@@ -1,16 +1,16 @@
 import React from 'react';
 import { Users, ScanFace, Activity, ShieldCheck } from 'lucide-react';
 
-export const StatsCards = ({ stats, totalCapacity = 65 }) => {
-  const attendanceRate = totalCapacity > 0
-    ? Math.min(100, Math.round((stats.totalPresent / totalCapacity) * 100))
+export const StatsCards = ({ stats, totalEnrolled = 0 }) => {
+  const attendanceRate = totalEnrolled > 0
+    ? Math.min(100, Math.round((stats.totalPresent / totalEnrolled) * 100))
     : 0;
 
   const cards = [
     {
       label: 'Attendance',
-      value: `${stats.totalPresent} / ${totalCapacity}`,
-      subtext: `${attendanceRate}% Present`,
+      value: `${stats.totalPresent} / ${totalEnrolled}`,
+      subtext: totalEnrolled > 0 ? `${attendanceRate}% Present` : '0 Enrolled Students',
       icon: Users,
       color: 'text-red-600',
       bg: 'bg-red-50 border-red-200',

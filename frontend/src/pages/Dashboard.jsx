@@ -27,6 +27,7 @@ export const Dashboard = () => {
 
   // Primary State
   const [presentStudents, setPresentStudents] = useState([]);
+  const [totalEnrolled, setTotalEnrolled] = useState(0);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('ALL');
@@ -109,10 +110,24 @@ export const Dashboard = () => {
     }
   };
 
+  // 2b. Fetch Enrolled Count
+  const fetchEnrolledCount = async () => {
+    try {
+      const res = await fetch('/api/students');
+      if (res.ok) {
+        const json = await res.json();
+        setTotalEnrolled(json.data ? json.data.length : 0);
+      }
+    } catch (e) {
+      console.warn('Could not fetch enrolled count:', e);
+    }
+  };
+
   useEffect(() => {
     fetchWorkerStatus();
     fetchCameras();
     fetchTodayAttendance();
+    fetchEnrolledCount();
   }, []);
 
   // 3. Socket.IO Event Listeners
@@ -157,6 +172,7 @@ export const Dashboard = () => {
     const handleDataReset = () => {
       setPresentStudents([]);
       fetchTodayAttendance();
+      fetchEnrolledCount();
     };
 
     socket.on('new_attendance', handleNewAttendance);
@@ -342,7 +358,10 @@ export const Dashboard = () => {
 
           {/* Refresh */}
           <button
-            onClick={fetchTodayAttendance}
+            onClick={() => {
+              fetchTodayAttendance();
+              fetchEnrolledCount();
+            }}
             className="p-2 rounded-xl bg-white border border-sandal-200 text-red-900/70 hover:text-red-600 hover:bg-sandal-50 transition-all shadow-sandal-sm"
             title="Refresh Attendance"
           >
@@ -361,7 +380,7 @@ export const Dashboard = () => {
       </div>
 
       {/* KPI Stats Overview */}
-      <StatsCards stats={stats} totalCapacity={65} />
+      <StatsCards stats={stats} totalEnrolled={totalEnrolled} />
 
       {/* Live Video & Latest Match Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-6">
