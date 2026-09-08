@@ -6,6 +6,7 @@ const AttendanceLog = require('../models/AttendanceLog');
 
 let workerProcess = null;
 let workerLogs = [];
+let activeCameraSource = '0';
 
 const pushLog = (line) => {
   if (!line) return;
@@ -21,28 +22,52 @@ const pushLog = (line) => {
  */
 const startWorker = (req, res) => {
   try {
+    const requestedCamera = (req.body && req.body.cameraSource !== undefined && String(req.body.cameraSource).trim() !== '')
+      ? String(req.body.cameraSource).trim()
+      : (activeCameraSource || '0');
+
     if (workerProcess) {
-      return res.status(200).json({
-        success: true,
-        message: 'Worker is already running.',
-        pid: workerProcess.pid,
-      });
+      // If the camera source is unchanged, worker is already running on it
+      if (requestedCamera === activeCameraSource) {
+        return res.status(200).json({
+          success: true,
+          message: `Worker is already running on Camera ${activeCameraSource}.`,
+          pid: workerProcess.pid,
+          cameraSource: activeCameraSource,
+        });
+      }
+
+      // Camera source changed while running - terminate old process first to switch
+      console.log(`[Worker Manager] Camera switch requested: ${activeCameraSource} -> ${requestedCamera}`);
+      const oldPid = workerProcess.pid;
+      if (process.platform === 'win32') {
+        exec(`taskkill /pid ${oldPid} /T /F`);
+      } else {
+        workerProcess.kill('SIGTERM');
+      }
+      workerProcess = null;
     }
 
+    activeCameraSource = requestedCamera;
     const cwd = path.resolve(__dirname, '../../../ml-engine');
 
-    console.log(`[Worker Manager] Spawning Python worker in: ${cwd}`);
-    workerLogs = [`[System] Starting Python ML Worker at ${new Date().toLocaleTimeString()}...`];
+    console.log(`[Worker Manager] Spawning Python worker in: ${cwd} (Camera: ${activeCameraSource})`);
+    workerLogs = [`[System] Starting Python ML Worker on camera [${activeCameraSource}] at ${new Date().toLocaleTimeString()}...`];
 
-    // Spawn python process inside ml-engine working directory
+    // Spawn python process inside ml-engine working directory with specified CAMERA_SOURCE
     workerProcess = spawn('python', ['ml_worker.py'], {
       cwd,
-      env: { ...process.env, SHOW_DISPLAY_WINDOW: 'false', PYTHONUNBUFFERED: '1' },
+      env: {
+        ...process.env,
+        CAMERA_SOURCE: activeCameraSource,
+        SHOW_DISPLAY_WINDOW: 'false',
+        PYTHONUNBUFFERED: '1',
+      },
       shell: true,
     });
 
     const pid = workerProcess.pid;
-    console.log(`[Worker Manager] Worker started with PID: ${pid}`);
+    console.log(`[Worker Manager] Worker started with PID: ${pid} (Camera: ${activeCameraSource})`);
 
     workerProcess.stdout.on('data', (data) => {
       const str = data.toString().trim();
@@ -63,19 +88,20 @@ const startWorker = (req, res) => {
 
       const io = req.app.get('io');
       if (io) {
-        io.emit('worker_status', { running: false, pid: null });
+        io.emit('worker_status', { running: false, pid: null, cameraSource: activeCameraSource });
       }
     });
 
     const io = req.app.get('io');
     if (io) {
-      io.emit('worker_status', { running: true, pid });
+      io.emit('worker_status', { running: true, pid, cameraSource: activeCameraSource });
     }
 
     return res.status(200).json({
       success: true,
-      message: 'ML Camera Worker started successfully.',
+      message: `ML Camera Worker started successfully on Camera ${activeCameraSource}.`,
       pid,
+      cameraSource: activeCameraSource,
     });
   } catch (error) {
     console.error('[Worker Manager Error]', error);
@@ -97,6 +123,7 @@ const stopWorker = (req, res) => {
       return res.status(200).json({
         success: true,
         message: 'Worker is not currently running.',
+        cameraSource: activeCameraSource,
       });
     }
 
@@ -118,12 +145,13 @@ const stopWorker = (req, res) => {
 
     const io = req.app.get('io');
     if (io) {
-      io.emit('worker_status', { running: false, pid: null });
+      io.emit('worker_status', { running: false, pid: null, cameraSource: activeCameraSource });
     }
 
     return res.status(200).json({
       success: true,
       message: 'ML Worker stopped successfully.',
+      cameraSource: activeCameraSource,
     });
   } catch (error) {
     console.error('[Stop Worker Error]', error);
@@ -144,7 +172,25 @@ const getWorkerStatus = (req, res) => {
     success: true,
     running: Boolean(workerProcess),
     pid: workerProcess ? workerProcess.pid : null,
+    cameraSource: activeCameraSource,
     logs: workerLogs.slice(-10),
+  });
+};
+
+/**
+ * @route   GET /api/worker/cameras
+ * @desc    Get detected and available camera sources
+ */
+const getAvailableCameras = (req, res) => {
+  return res.status(200).json({
+    success: true,
+    activeCamera: activeCameraSource,
+    cameras: [
+      { id: '0', label: 'Camera 0 (Default Laptop Webcam)' },
+      { id: '1', label: 'Camera 1 (Phone Link / Virtual Camera)' },
+      { id: '2', label: 'Camera 2 (Phone Link / Secondary Device)' },
+      { id: '3', label: 'Camera 3 (External Camera)' },
+    ],
   });
 };
 
@@ -187,5 +233,6 @@ module.exports = {
   startWorker,
   stopWorker,
   getWorkerStatus,
+  getAvailableCameras,
   resetSystemData,
 };

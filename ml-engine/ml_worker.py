@@ -106,12 +106,24 @@ def main():
         print(f"   Latest enrolled: {last_enrolled.get('name')} ({last_enrolled.get('studentId')})\n")
 
     cam_index = int(CAMERA_SOURCE) if CAMERA_SOURCE.isdigit() else CAMERA_SOURCE
-    cap = cv2.VideoCapture(cam_index)
+    logger.info(f"Connecting to camera source: '{CAMERA_SOURCE}'...")
+
+    if isinstance(cam_index, int):
+        # On Windows, try DirectShow (CAP_DSHOW) first for Phone Link and external cameras
+        cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
+        if not cap.isOpened():
+            logger.info(f"DirectShow open failed for camera {cam_index}, trying default backend...")
+            cap = cv2.VideoCapture(cam_index)
+    else:
+        # RTSP / HTTP video stream URL
+        cap = cv2.VideoCapture(cam_index)
 
     is_mock_feed = False
     if not cap.isOpened():
-        logger.warning(f"Webcam index '{CAMERA_SOURCE}' could not be opened. Using test feed.")
+        logger.warning(f"Camera source '{CAMERA_SOURCE}' could not be opened. Using test feed.")
         is_mock_feed = True
+    else:
+        logger.info(f"✅ Successfully opened camera source: '{CAMERA_SOURCE}'")
 
     last_processed_time = 0.0
     last_frame_broadcast = 0.0
@@ -199,7 +211,7 @@ def main():
 
             # Top Header Bar
             cv2.rectangle(display_frame, (0, 0), (w, 36), (15, 17, 23), -1)
-            status_line = f"ENTRANCE AI | Next Scan: {countdown:.1f}s | Enrolled Cohort: {len(matcher.enrolled_students)}"
+            status_line = f"ENTRANCE AI | Cam {CAMERA_SOURCE} | Scan: {countdown:.1f}s | Enrolled: {len(matcher.enrolled_students)}"
             cv2.putText(display_frame, status_line, (15, 24),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 240, 120), 2)
 

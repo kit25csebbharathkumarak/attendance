@@ -18,6 +18,7 @@ const {
   startWorker,
   stopWorker,
   getWorkerStatus,
+  getAvailableCameras,
   resetSystemData,
 } = require('../controllers/workerController');
 
@@ -38,6 +39,7 @@ router.post('/webhook/frame', broadcastCameraFrame);
 router.post('/worker/start', startWorker);
 router.post('/worker/stop', stopWorker);
 router.get('/worker/status', getWorkerStatus);
+router.get('/worker/cameras', getAvailableCameras);
 router.post('/system/reset', resetSystemData);
 
 module.exports = router;

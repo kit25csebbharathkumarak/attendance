@@ -15,7 +15,9 @@ import {
   Eye,
   ShieldCheck,
   Activity,
-  AlertTriangle
+  AlertTriangle,
+  Smartphone,
+  Video
 } from 'lucide-react';
 import { useSocket } from '../context/SocketContext';
 import { StatsCards } from '../components/StatsCards';
@@ -35,6 +37,19 @@ export const Dashboard = () => {
   const [workerPid, setWorkerPid] = useState(null);
   const [workerLoading, setWorkerLoading] = useState(false);
 
+  // Camera Source Selection (Default 1 for Phone Link, or saved choice)
+  const [cameraSource, setCameraSource] = useState(
+    () => localStorage.getItem('selected_camera_source') || '1'
+  );
+  const [customIpUrl, setCustomIpUrl] = useState('');
+  const [availableCameras, setAvailableCameras] = useState([
+    { id: '1', label: 'Camera 1 (Phone Link / Virtual Camera)' },
+    { id: '0', label: 'Camera 0 (Default Laptop Webcam)' },
+    { id: '2', label: 'Camera 2 (Phone Link / Secondary Device)' },
+    { id: '3', label: 'Camera 3 (External Device)' },
+    { id: 'custom', label: '🌐 Custom IP / RTSP Stream URL' },
+  ]);
+
   // Live Stream State
   const [liveFrame, setLiveFrame] = useState(null);
   const [lastFrameTime, setLastFrameTime] = useState(0);
@@ -51,9 +66,30 @@ export const Dashboard = () => {
         const json = await res.json();
         setWorkerRunning(json.running);
         setWorkerPid(json.pid);
+        if (json.cameraSource) {
+          setCameraSource(json.cameraSource);
+        }
       }
     } catch (e) {
       console.warn('Worker status check failed:', e);
+    }
+  };
+
+  // 1b. Fetch Available Cameras on Mount
+  const fetchCameras = async () => {
+    try {
+      const res = await fetch('/api/worker/cameras');
+      if (res.ok) {
+        const json = await res.json();
+        if (json.cameras) {
+          setAvailableCameras([
+            ...json.cameras,
+            { id: 'custom', label: '🌐 Custom IP / RTSP Stream URL' },
+          ]);
+        }
+      }
+    } catch (e) {
+      console.warn('Cameras check failed:', e);
     }
   };
 
@@ -75,6 +111,7 @@ export const Dashboard = () => {
 
   useEffect(() => {
     fetchWorkerStatus();
+    fetchCameras();
     fetchTodayAttendance();
   }, []);
 
@@ -108,6 +145,9 @@ export const Dashboard = () => {
     const handleWorkerStatus = (data) => {
       setWorkerRunning(data.running);
       setWorkerPid(data.pid);
+      if (data.cameraSource) {
+        setCameraSource(data.cameraSource);
+      }
       if (!data.running) {
         setLiveFrame(null);
       }
@@ -132,27 +172,48 @@ export const Dashboard = () => {
     };
   }, [socket]);
 
-  // Worker Start / Stop Handlers
-  const toggleWorker = async () => {
+  // Worker Start / Stop & Camera Switching Handlers
+  const toggleWorker = async (overrideSource) => {
     try {
       setWorkerLoading(true);
-      const endpoint = workerRunning ? '/api/worker/stop' : '/api/worker/start';
-      const res = await fetch(endpoint, { method: 'POST' });
-      const data = await res.json();
-      if (res.ok) {
-        if (!workerRunning) {
-          setWorkerRunning(true);
-          setWorkerPid(data.pid);
-        } else {
+      const effectiveSource = overrideSource !== undefined
+        ? overrideSource
+        : (cameraSource === 'custom' ? (customIpUrl || '0') : cameraSource);
+
+      if (workerRunning && !overrideSource) {
+        const res = await fetch('/api/worker/stop', { method: 'POST' });
+        if (res.ok) {
           setWorkerRunning(false);
           setWorkerPid(null);
           setLiveFrame(null);
+        }
+      } else {
+        const res = await fetch('/api/worker/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cameraSource: effectiveSource }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          setWorkerRunning(true);
+          setWorkerPid(data.pid);
+          if (data.cameraSource) {
+            setCameraSource(data.cameraSource);
+          }
         }
       }
     } catch (err) {
       console.error('Failed to toggle worker:', err);
     } finally {
       setWorkerLoading(false);
+    }
+  };
+
+  const handleCameraChange = (newSource) => {
+    setCameraSource(newSource);
+    localStorage.setItem('selected_camera_source', newSource);
+    if (workerRunning && newSource !== 'custom') {
+      toggleWorker(newSource);
     }
   };
 
@@ -259,9 +320,26 @@ export const Dashboard = () => {
 
         {/* Master Control Buttons */}
         <div className="flex flex-wrap items-center gap-2.5">
+          {/* Camera Source Selector */}
+          <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-dark-900 border border-white/10 text-xs shadow-md">
+            <Smartphone className="w-4 h-4 text-brand-400 shrink-0" />
+            <span className="text-slate-400 font-semibold hidden sm:inline">Camera:</span>
+            <select
+              value={cameraSource}
+              onChange={(e) => handleCameraChange(e.target.value)}
+              className="bg-transparent text-slate-100 font-semibold focus:outline-none cursor-pointer pr-1 text-xs"
+            >
+              {availableCameras.map((cam) => (
+                <option key={cam.id} value={cam.id} className="bg-dark-950 text-slate-200">
+                  {cam.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
           {/* Start/Stop ML Worker Button */}
           <button
-            onClick={toggleWorker}
+            onClick={() => toggleWorker()}
             disabled={workerLoading}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all shadow-lg active:scale-95 disabled:opacity-50 ${
               workerRunning
@@ -322,9 +400,59 @@ export const Dashboard = () => {
               }`}
             >
               <Eye className="w-3 h-3" />
-              {isStreamActive ? 'Live Camera Feed' : workerRunning ? 'Connecting Stream...' : 'Worker Standby'}
+              {isStreamActive ? `Live Camera Feed (Cam ${cameraSource})` : workerRunning ? 'Connecting Stream...' : 'Worker Standby'}
             </span>
           </div>
+
+          {/* Quick Camera Switcher Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-xl bg-dark-900/80 border border-white/5 mb-3">
+            <div className="flex items-center gap-1.5 text-xs text-slate-400">
+              <Smartphone className="w-3.5 h-3.5 text-brand-400" />
+              <span className="font-semibold text-slate-300">Quick Select Camera:</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {[
+                { id: '1', label: '📱 Phone Link (Cam 1)' },
+                { id: '2', label: '📱 Phone Link (Cam 2)' },
+                { id: '0', label: '💻 Laptop Webcam (0)' },
+                { id: 'custom', label: '🌐 IP / RTSP' },
+              ].map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => handleCameraChange(opt.id)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                    cameraSource === opt.id
+                      ? 'bg-brand-500 text-white shadow-md shadow-brand-500/30 ring-1 ring-white/30'
+                      : 'bg-dark-850 hover:bg-dark-800 text-slate-300 border border-white/5'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Custom IP Stream URL Input */}
+          {cameraSource === 'custom' && (
+            <div className="flex items-center gap-2 mb-3">
+              <input
+                type="text"
+                placeholder="e.g. http://192.168.1.15:8080/video or rtsp://..."
+                value={customIpUrl}
+                onChange={(e) => setCustomIpUrl(e.target.value)}
+                className="flex-1 px-3 py-1.5 rounded-xl bg-dark-900 border border-white/10 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-brand-500"
+              />
+              <button
+                type="button"
+                onClick={() => toggleWorker(customIpUrl)}
+                disabled={workerLoading || !customIpUrl}
+                className="px-3 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold transition-all disabled:opacity-50"
+              >
+                Connect Stream
+              </button>
+            </div>
+          )}
 
           <div className="relative rounded-xl overflow-hidden bg-black aspect-video flex items-center justify-center border border-white/10 shadow-inner">
             {isStreamActive ? (
@@ -337,7 +465,7 @@ export const Dashboard = () => {
                 {/* On-screen HUD Bar */}
                 <div className="absolute top-3 left-3 px-3 py-1 rounded-lg bg-black/80 backdrop-blur-md border border-emerald-500/30 text-xs text-emerald-400 font-semibold flex items-center gap-1.5 shadow-lg">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 live-pulse" />
-                  YOLOv8 + FaceNet Camera Active (Adjust angle so face is centered)
+                  YOLOv8 + FaceNet Active • Camera [{cameraSource === '1' ? '1 (Phone Link)' : cameraSource === '2' ? '2 (Phone Link)' : cameraSource === '0' ? '0 (Laptop Webcam)' : cameraSource}]
                 </div>
               </>
             ) : (
@@ -347,22 +475,22 @@ export const Dashboard = () => {
                 </div>
                 <div>
                   <p className="text-sm font-semibold text-slate-200">
-                    {workerRunning ? 'Initializing Camera Feed...' : 'Live Camera Stream Offline'}
+                    {workerRunning ? `Connecting to Camera ${cameraSource}...` : 'Live Camera Stream Offline'}
                   </p>
                   <p className="text-xs text-slate-500 mt-1 max-w-sm">
                     {workerRunning
-                      ? 'Camera is warming up. Live frames with AI bounding boxes will appear here in a few seconds.'
-                      : 'Click the green "Start ML Camera Worker" button above to launch the camera and adjust your angle.'}
+                      ? `Camera ${cameraSource} is warming up. If you are using Phone Link, ensure the Phone Link camera is streaming on your phone.`
+                      : 'Select your preferred camera (e.g. Phone Link Cam 1 or Webcam 0) and click Start ML Camera Worker.'}
                   </p>
                 </div>
                 {!workerRunning && (
                   <button
-                    onClick={toggleWorker}
+                    onClick={() => toggleWorker()}
                     disabled={workerLoading}
                     className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-md transition-all flex items-center gap-1.5"
                   >
                     <Play className="w-3.5 h-3.5 fill-current" />
-                    Start Camera Feed
+                    Start Camera Feed ({cameraSource === '1' ? 'Phone Link' : `Camera ${cameraSource}`})
                   </button>
                 )}
               </div>
