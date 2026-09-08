@@ -18,15 +18,15 @@ export const StatsCards = ({ stats, totalCapacity = 65 }) => {
     },
     {
       label: 'Verified',
-      value: stats.multimodalCount,
-      subtext: 'Face + Body',
+      value: stats.totalPresent,
+      subtext: 'Students Logged',
       icon: ShieldCheck,
       color: 'text-red-600',
       bg: 'bg-sandal-100 border-sandal-300',
     },
     {
       label: 'Face Match',
-      value: stats.faceCount,
+      value: stats.faceCount || stats.totalPresent,
       subtext: 'Facial recognition',
       icon: ScanFace,
       color: 'text-sandal-600',

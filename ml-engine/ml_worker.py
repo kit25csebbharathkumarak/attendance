@@ -114,6 +114,12 @@ def main():
         if not cap.isOpened():
             logger.info(f"DirectShow open failed for camera {cam_index}, trying default backend...")
             cap = cv2.VideoCapture(cam_index)
+        # Automatic fallback to default webcam (Camera 0) if chosen camera is offline
+        if not cap.isOpened() and cam_index != 0:
+            logger.warning(f"Camera {cam_index} unavailable. Falling back to default Laptop Webcam (0)...")
+            cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+            if not cap.isOpened():
+                cap = cv2.VideoCapture(0)
     else:
         # RTSP / HTTP video stream URL
         cap = cv2.VideoCapture(cam_index)
@@ -162,18 +168,28 @@ def main():
                 last_processed_time = current_time
                 recent_detections = []
 
-                # A. Detect people
+                # A. Detect people via YOLOv8
                 persons = detector.detect_people(frame)
 
-                for p in persons:
-                    x1, y1, x2, y2 = p["bbox"]
-                    person_crop = frame[y1:y2, x1:x2].copy()
+                # Prepare candidate crops: from detected person bodies, or full frame if close to webcam
+                targets = []
+                if persons and len(persons) > 0:
+                    for p in persons:
+                        px1, py1, px2, py2 = p["bbox"]
+                        crop = frame[py1:py2, px1:px2].copy()
+                        if crop.size > 0:
+                            targets.append({"bbox": (px1, py1, px2, py2), "crop": crop, "is_body": True})
+                else:
+                    # Desk/webcam close-up fallback (when full torso isn't visible)
+                    h, w = frame.shape[:2]
+                    targets.append({"bbox": (int(w * 0.2), int(h * 0.1), int(w * 0.8), int(h * 0.9)), "crop": frame.copy(), "is_body": False})
 
-                    if person_crop.size == 0:
-                        continue
+                for t in targets:
+                    bx1, by1, bx2, by2 = t["bbox"]
+                    target_crop = t["crop"]
 
                     # B. FaceNet Feature Extraction & Match
-                    matched_id, student_name, confidence, match_type, face_crop = matcher.match_face(person_crop)
+                    matched_id, student_name, confidence, match_type, face_crop = matcher.match_face(target_crop)
 
                     # Encode thumbnail photo
                     photo_b64 = None
@@ -189,19 +205,28 @@ def main():
                         logger.info(f"🎯 Recognized Student: {student_name} ({matched_id}) [Score: {confidence:.3f}]")
                         send_to_backend(matched_id, confidence, match_type, photo=photo_b64)
                         recent_detections.append({
-                            "bbox": (x1, y1, x2, y2),
+                            "bbox": (bx1, by1, bx2, by2),
                             "matched": True,
                             "label": f"{student_name} ({matched_id})",
                             "confidence": confidence,
                             "type": match_type
                         })
-                    else:
+                    elif t["is_body"]:
+                        # Body detected by YOLO, but face hidden/obscured
                         recent_detections.append({
-                            "bbox": (x1, y1, x2, y2),
+                            "bbox": (bx1, by1, bx2, by2),
                             "matched": False,
-                            "label": f"Face scanning... ({confidence:.2f})",
-                            "confidence": confidence,
+                            "label": "Body Detected (Face Obscured)",
+                            "confidence": 0.0,
                             "type": "Body"
+                        })
+                    elif confidence > 0.2:
+                        recent_detections.append({
+                            "bbox": (bx1, by1, bx2, by2),
+                            "matched": False,
+                            "label": f"Scanning face... ({confidence:.2f})",
+                            "confidence": confidence,
+                            "type": "Face"
                         })
 
             # 3. Create Display & Overlay

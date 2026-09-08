@@ -49,6 +49,16 @@ const saveAttendanceToFile = () => {
   }
 };
 
+const clearAttendanceData = () => {
+  memoryAttendanceLogs.length = 0;
+  try {
+    fs.writeFileSync(attendanceFile, JSON.stringify([], null, 2));
+    console.log('[DataStore] Today\'s attendance logs have been cleared.');
+  } catch (e) {
+    console.error('[DataStore] Error clearing attendance file:', e);
+  }
+};
+
 const clearAllData = () => {
   memoryStudents.length = 0;
   memoryAttendanceLogs.length = 0;
@@ -69,5 +79,6 @@ module.exports = {
   memoryAttendanceLogs,
   saveStudentsToFile,
   saveAttendanceToFile,
+  clearAttendanceData,
   clearAllData,
 };

@@ -1,6 +1,6 @@
 const AttendanceLog = require('../models/AttendanceLog');
 const Student = require('../models/Student');
-const { isMongoConnected, memoryStudents, memoryAttendanceLogs } = require('../config/dataStore');
+const { isMongoConnected, memoryStudents, memoryAttendanceLogs, saveAttendanceToFile } = require('../config/dataStore');
 
 // In-memory debounce cache to prevent duplicate queries under high frame rate
 // Map: studentId -> lastTimestamp (ms)
@@ -180,6 +180,7 @@ const recordMatchWebhook = async (req, res) => {
       };
 
       memoryAttendanceLogs.unshift(newLogRecord);
+      saveAttendanceToFile();
 
     }
 

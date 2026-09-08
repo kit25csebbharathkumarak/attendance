@@ -103,12 +103,46 @@ class FaceMatcher:
         
         :return: (studentId, studentName, confidence, matchType, face_crop)
         """
+        if person_crop is None or person_crop.size == 0:
+            return None, None, 0.0, "Body", None
+
+        # Detect face and bounding box
+        face_crop = None
+        try:
+            rgb = cv2.cvtColor(person_crop, cv2.COLOR_BGR2RGB)
+            pil_img = Image.fromarray(rgb)
+            boxes, _ = self.mtcnn.detect(pil_img)
+            if boxes is not None and len(boxes) > 0:
+                b = [int(v) for v in boxes[0]]
+                # Add margin to face crop
+                pad_y = int((b[3] - b[1]) * 0.15)
+                pad_x = int((b[2] - b[0]) * 0.15)
+                fy1 = max(0, b[1] - pad_y)
+                fy2 = min(person_crop.shape[0], b[3] + pad_y)
+                fx1 = max(0, b[0] - pad_x)
+                fx2 = min(person_crop.shape[1], b[2] + pad_x)
+                if fy2 > fy1 and fx2 > fx1:
+                    face_crop = person_crop[fy1:fy2, fx1:fx2]
+        except Exception:
+            pass
+
         query_emb = self.extract_embedding(person_crop)
+        if query_emb is None:
+            # If full crop didn't trigger, try upper 60% of person
+            if person_crop.shape[0] > 100:
+                upper = person_crop[:int(person_crop.shape[0] * 0.6), :]
+                query_emb = self.extract_embedding(upper)
+                if query_emb is not None and face_crop is None:
+                    face_crop = upper
+
         if query_emb is None:
             return None, None, 0.0, "Body", None
 
+        if face_crop is None or face_crop.size == 0:
+            face_crop = person_crop
+
         if not self.enrolled_students:
-            return None, None, 0.0, "Unenrolled", None
+            return None, None, 0.0, "Unenrolled", face_crop
 
         best_student_id = None
         best_student_name = None
@@ -143,7 +177,7 @@ class FaceMatcher:
 
         if best_similarity >= self.similarity_threshold:
             match_type = "Multimodal" if best_similarity >= 0.65 else "Face"
-            return best_student_id, best_student_name, best_similarity, match_type, person_crop
+            return best_student_id, best_student_name, best_similarity, match_type, face_crop
 
-        return None, None, max(0.0, best_similarity), "Face", person_crop
+        return None, None, max(0.0, best_similarity), "Face", face_crop
 

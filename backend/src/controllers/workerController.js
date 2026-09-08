@@ -1,6 +1,6 @@
 const { spawn, exec } = require('child_process');
 const path = require('path');
-const { clearAllData } = require('../config/dataStore');
+const { clearAttendanceData } = require('../config/dataStore');
 const Student = require('../models/Student');
 const AttendanceLog = require('../models/AttendanceLog');
 
@@ -200,11 +200,10 @@ const getAvailableCameras = (req, res) => {
  */
 const resetSystemData = async (req, res) => {
   try {
-    console.log('[System Reset] Clearing all demo students and attendance records...');
-    clearAllData();
+    console.log('[System Reset] Clearing attendance records...');
+    clearAttendanceData();
 
     try {
-      await Student.deleteMany({});
       await AttendanceLog.deleteMany({});
     } catch (e) {
       // MongoDB might not be running
@@ -217,7 +216,7 @@ const resetSystemData = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: 'All demo students and attendance logs cleared! Ready for fresh real enrollment.',
+      message: 'Today\'s attendance logs cleared successfully.',
     });
   } catch (error) {
     console.error('[Reset Error]', error);

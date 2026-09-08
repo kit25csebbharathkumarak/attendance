@@ -37,14 +37,14 @@ export const Dashboard = () => {
   const [workerPid, setWorkerPid] = useState(null);
   const [workerLoading, setWorkerLoading] = useState(false);
 
-  // Camera Source Selection (Default 1 for Phone Link, or saved choice)
+  // Camera Source Selection (Default 0 for Laptop Webcam, or saved choice)
   const [cameraSource, setCameraSource] = useState(
-    () => localStorage.getItem('selected_camera_source') || '1'
+    () => localStorage.getItem('selected_camera_source') || '0'
   );
   const [customIpUrl, setCustomIpUrl] = useState('');
   const [availableCameras, setAvailableCameras] = useState([
-    { id: '1', label: 'Camera 1 (Phone Link / Virtual Camera)' },
     { id: '0', label: 'Camera 0 (Default Laptop Webcam)' },
+    { id: '1', label: 'Camera 1 (Phone Link / Virtual Camera)' },
     { id: '2', label: 'Camera 2 (Phone Link / Secondary Device)' },
     { id: '3', label: 'Camera 3 (External Device)' },
     { id: 'custom', label: '🌐 Custom IP / RTSP Stream URL' },
