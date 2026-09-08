@@ -22,32 +22,44 @@ const extractRealEmbeddingFromImage = (base64Data) => {
       const scriptPath = path.resolve(__dirname, '../../../ml-engine/extract_embedding.py');
       const pythonCmd = `python "${scriptPath}" "${tempFile}"`;
 
-      exec(pythonCmd, { timeout: 15000 }, (error, stdout, stderr) => {
+      exec(pythonCmd, { timeout: 30000 }, (error, stdout, stderr) => {
         // Clean up temp file
         if (fs.existsSync(tempFile)) {
           fs.unlinkSync(tempFile);
         }
 
-        if (error) {
+        if (error && !stdout) {
           console.error('[FaceNet Extraction Error]', stderr || error.message);
           return resolve(null);
         }
 
         try {
-          // Parse last line of stdout as JSON
+          // Parse stdout searching for valid JSON
           const lines = stdout.trim().split('\n');
-          const jsonLine = lines[lines.length - 1];
-          const result = JSON.parse(jsonLine);
-          if (result.success && result.embedding) {
+          let result = null;
+          for (let i = lines.length - 1; i >= 0; i--) {
+            try {
+              const parsed = JSON.parse(lines[i].trim());
+              if (parsed && parsed.success !== undefined) {
+                result = parsed;
+                break;
+              }
+            } catch (e) {}
+          }
+
+          if (result && result.success && result.embedding) {
             return resolve(result.embedding);
           }
-          console.warn('[FaceNet Notice]', result.error);
+          if (result && result.error) {
+            console.warn('[FaceNet Notice]', result.error);
+          }
           return resolve(null);
         } catch (parseErr) {
           console.error('[FaceNet Output Parse Error]', stdout);
           return resolve(null);
         }
       });
+
     } catch (e) {
       console.error('[Image Processing Exception]', e);
       return resolve(null);
@@ -130,6 +142,7 @@ const enrollStudent = async (req, res) => {
       name: cleanName,
       department: cleanDept,
       email: cleanEmail,
+      avatarUrl: image || avatarUrl || '',
       faceEmbeddings: finalEmbeddings,
       createdAt: new Date(),
     };
@@ -141,7 +154,6 @@ const enrollStudent = async (req, res) => {
     }
     saveStudentsToFile();
 
-
     return res.status(200).json({
       success: true,
       message: `Student ${cleanName} (${cleanId}) successfully enrolled with real 512-d FaceNet embeddings.`,
@@ -149,6 +161,7 @@ const enrollStudent = async (req, res) => {
         studentId: newStudent.studentId,
         name: newStudent.name,
         department: newStudent.department,
+        avatarUrl: newStudent.avatarUrl,
         embeddingDimensions: finalEmbeddings[0].length,
         createdAt: newStudent.createdAt,
       },
@@ -170,7 +183,7 @@ const enrollStudent = async (req, res) => {
 const getStudents = async (req, res) => {
   try {
     if (isMongoConnected()) {
-      const students = await Student.find({}, 'studentId name department email createdAt')
+      const students = await Student.find({}, 'studentId name department email avatarUrl createdAt')
         .sort({ studentId: 1 })
         .lean();
 
@@ -189,9 +202,11 @@ const getStudents = async (req, res) => {
         name: s.name,
         department: s.department,
         email: s.email,
+        avatarUrl: s.avatarUrl || '',
         createdAt: s.createdAt,
       })),
     });
+
   } catch (error) {
     console.error('[Get Students Error]', error);
     return res.status(500).json({
