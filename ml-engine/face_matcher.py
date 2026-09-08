@@ -1,9 +1,13 @@
+import os
 import logging
+import cv2
+import torch
 import numpy as np
 import requests
 from typing import List, Dict, Any, Optional, Tuple
-from deepface import DeepFace
-from utils.vision_helpers import match_embedding_against_db
+from PIL import Image
+
+from facenet_pytorch import MTCNN, InceptionResnetV1
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("FaceMatcher")
@@ -11,114 +15,131 @@ logger = logging.getLogger("FaceMatcher")
 
 class FaceMatcher:
     """
-    Facial feature extraction and cosine vector matching using DeepFace.
+    Production Face Recognition Engine:
+    - Face Detection & Alignment: MTCNN (Multi-task Cascaded Convolutional Networks)
+    - Feature Extraction: PyTorch InceptionResnetV1 (FaceNet 512-d) pretrained on VGGFace2
+    - Matching: High-dimensional Cosine Vector Distance against Enrolled Cohort
     """
 
-    def __init__(
-        self,
-        model_name: str = "Facenet512",
-        detector_backend: str = "opencv",
-        similarity_threshold: float = 0.65
-    ):
-        """
-        :param model_name: 'Facenet512', 'VGG-Face', 'ArcFace', etc.
-        :param detector_backend: 'opencv', 'retinaface', 'mtcnn', or 'ssd'
-        :param similarity_threshold: Minimum cosine similarity to accept a match
-        """
-        self.model_name = model_name
-        self.detector_backend = detector_backend
+    def __init__(self, similarity_threshold: float = 0.60):
         self.similarity_threshold = similarity_threshold
-        self.enrolled_cache: List[Dict[str, Any]] = []
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        logger.info(f"Initializing FaceNet & MTCNN on device: {self.device}")
 
-    def load_enrolled_students(self, backend_url: Optional[str] = None):
-        """
-        Fetch enrolled student embeddings from backend or fallback to local sample.
-        """
-        if backend_url:
-            try:
-                resp = requests.get(backend_url, timeout=5)
-                if resp.status_code == 200:
-                    data = resp.json().get("data", [])
-                    self.enrolled_cache = data
-                    logger.info(f"Loaded {len(data)} enrolled student embeddings from backend.")
-                    return
-            except Exception as e:
-                logger.warning(f"Could not reach backend at {backend_url} ({e}). Using local mock.")
+        # Deep Learning Face Detector & Aligner
+        self.mtcnn = MTCNN(
+            image_size=160,
+            margin=14,
+            keep_all=False,
+            device=self.device,
+            post_process=True
+        )
 
-        # Default fallback mock student for immediate zero-config testing
-        if not self.enrolled_cache:
-            # Generate a 512-d normalized mock vector
-            mock_vec = np.random.uniform(-0.1, 0.1, 512).astype(np.float32)
-            mock_vec /= np.linalg.norm(mock_vec)
-            self.enrolled_cache = [
-                {
-                    "studentId": "STU101",
-                    "name": "Alex Johnson",
-                    "faceEmbeddings": [mock_vec.tolist()]
-                }
-            ]
-            logger.info("Initialized local fallback enrollment cache with demo student STU101.")
+        # Pretrained 512-d FaceNet Feature Extractor
+        self.model = InceptionResnetV1(pretrained="vggface2").eval().to(self.device)
+        logger.info("FaceNet (InceptionResnetV1, 512-d) and MTCNN ready.")
 
-    def extract_embedding(self, face_image: np.ndarray) -> Optional[np.ndarray]:
+        self.enrolled_students: List[Dict[str, Any]] = []
+
+    def load_enrolled_students(self, backend_url: str = "http://localhost:5000/api/students/embeddings") -> int:
         """
-        Extract normalized facial embedding vector from cropped face/person image.
-        Uses try/except block to handle cases where face is obscured or not detected.
-        
-        :param face_image: BGR numpy image array
-        :return: 1D numpy array of embeddings or None
+        Loads enrolled students with their 512-d embeddings from the backend API.
         """
-        if face_image is None or face_image.size == 0:
+        try:
+            resp = requests.get(backend_url, timeout=5)
+            if resp.status_code == 200:
+                data = resp.json().get("data", [])
+                self.enrolled_students = data
+                logger.info(f"Loaded {len(data)} enrolled student profiles from backend.")
+                return len(data)
+            else:
+                logger.warning(f"Backend returned status {resp.status_code}")
+        except Exception as e:
+            logger.warning(f"Could not reach backend at {backend_url} ({e}).")
+
+        return len(self.enrolled_students)
+
+    def extract_embedding(self, image: Any) -> Optional[np.ndarray]:
+        """
+        Detects face, aligns it, and computes a normalized 512-d embedding.
+        Accepts OpenCV BGR numpy array or PIL Image.
+        """
+        if image is None:
             return None
 
         try:
-            # enforce_detection=False allows graceful extraction without throwing fatal exceptions
-            reps = DeepFace.represent(
-                img_path=face_image,
-                model_name=self.model_name,
-                detector_backend=self.detector_backend,
-                enforce_detection=False,
-                align=True
-            )
+            if isinstance(image, np.ndarray):
+                if image.size == 0:
+                    return None
+                rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                pil_img = Image.fromarray(rgb)
+            else:
+                pil_img = image
 
-            if reps and len(reps) > 0:
-                raw_emb = reps[0].get("embedding")
-                if raw_emb:
-                    vec = np.array(raw_emb, dtype=np.float32)
-                    norm = np.linalg.norm(vec)
-                    if norm > 0:
-                        vec /= norm
-                    return vec
+            # Run MTCNN face detector and crop
+            face_tensor = self.mtcnn(pil_img)
+            if face_tensor is None:
+                return None
 
-        except ValueError as ve:
-            # DeepFace threw error because face wasn't visible or image invalid
-            logger.debug(f"Face not visible in cropped region: {ve}")
+            # Add batch dimension and pass through FaceNet
+            face_tensor = face_tensor.unsqueeze(0).to(self.device)
+            with torch.no_grad():
+                emb = self.model(face_tensor).cpu().numpy().flatten()
+
+            # L2 Normalize
+            norm = np.linalg.norm(emb)
+            if norm > 0:
+                emb = emb / norm
+
+            return emb.astype(np.float32)
         except Exception as e:
-            logger.debug(f"DeepFace representation extraction error: {e}")
+            logger.debug(f"Error during MTCNN/FaceNet feature extraction: {e}")
+            return None
 
-        return None
-
-    def match_face(self, face_image: np.ndarray) -> Tuple[Optional[str], float, str]:
+    def match_face(self, person_crop: np.ndarray) -> Tuple[Optional[str], Optional[str], float, str]:
         """
-        Extract embedding and match against the enrolled database.
+        Given a person crop from YOLOv8, detects face with MTCNN, extracts 512-d embedding,
+        and computes cosine similarity against enrolled students.
         
-        :param face_image: Cropped bounding box region
-        :return: (studentId, confidence, matchType)
+        :return: (studentId, studentName, confidence, matchType)
         """
-        embedding = self.extract_embedding(face_image)
+        query_emb = self.extract_embedding(person_crop)
+        if query_emb is None:
+            return None, None, 0.0, "Body"
 
-        if embedding is None:
-            # Face not visible or obscured; multimodal fallback to body context
-            return None, 0.0, "Body"
+        if not self.enrolled_students:
+            return None, None, 0.0, "Unenrolled"
 
-        matched_id, confidence = match_embedding_against_db(
-            embedding,
-            self.enrolled_cache,
-            threshold=self.similarity_threshold
-        )
+        best_student_id = None
+        best_student_name = None
+        best_similarity = -1.0
 
-        if matched_id:
-            # High confidence face match in entrance zone
-            match_type = "Multimodal" if confidence >= 0.75 else "Face"
-            return matched_id, confidence, match_type
+        for student in self.enrolled_students:
+            s_id = student.get("studentId")
+            s_name = student.get("name", s_id)
+            embeddings = student.get("faceEmbeddings", [])
 
-        return None, confidence, "Face"
+            if not embeddings:
+                continue
+
+            if isinstance(embeddings[0], (int, float)):
+                candidates = [np.array(embeddings, dtype=np.float32)]
+            else:
+                candidates = [np.array(e, dtype=np.float32) for e in embeddings if len(e) > 0]
+
+            for cand in candidates:
+                cand_norm = np.linalg.norm(cand)
+                if cand_norm > 0:
+                    cand = cand / cand_norm
+                sim = float(np.dot(query_emb, cand))
+
+                if sim > best_similarity:
+                    best_similarity = sim
+                    best_student_id = s_id
+                    best_student_name = s_name
+
+        if best_similarity >= self.similarity_threshold:
+            match_type = "Multimodal" if best_similarity >= 0.72 else "Face"
+            return best_student_id, best_student_name, best_similarity, match_type
+
+        return None, None, max(0.0, best_similarity), "Face"
