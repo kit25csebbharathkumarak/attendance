@@ -282,10 +282,15 @@ const broadcastCameraFrame = (req, res) => {
   return res.status(200).json({ success: true });
 };
 
+const clearRecentMatchCache = () => {
+  recentMatchCache.clear();
+};
+
 module.exports = {
   getTodayAttendance,
   recordMatchWebhook,
   getTodayStats,
   broadcastCameraFrame,
+  clearRecentMatchCache,
 };
 

@@ -83,7 +83,90 @@ def broadcast_frame_to_dashboard(display_frame: np.ndarray):
         pass
 
 
+def acquire_single_instance_lock():
+    """
+    Ensures that only ONE instance of ml_worker.py runs at any given time.
+    Prevents multiple processes from fighting for the webcam hardware, which
+    causes DirectShow buffer tearing, vertical color striping, and black screens.
+    """
+    lock_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml_worker.lock")
+    try:
+        lock_file = open(lock_path, "w")
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock_file.write(str(os.getpid()))
+        lock_file.flush()
+        return lock_file, lock_path
+    except (OSError, IOError):
+        logger.error("❌ Another instance of ML Worker is already running. Exiting to avoid camera hardware conflict.")
+        sys.exit(0)
+
+
+def release_single_instance_lock(lock_file, lock_path):
+    try:
+        if lock_file:
+            lock_file.close()
+        if lock_path and os.path.exists(lock_path):
+            os.remove(lock_path)
+    except Exception:
+        pass
+
+
+def open_camera_source(cam_source):
+    """
+    Robustly opens the webcam stream. Sets MJPG format and buffer size 1 to
+    eliminate YUY2 stride/chroma inversion (vertical pink/green stripes) and
+    flushes camera warmup frames to prevent initial black screens.
+    """
+    cam_index = int(cam_source) if str(cam_source).isdigit() else cam_source
+    logger.info(f"Connecting to camera source: '{cam_source}'...")
+
+    if not isinstance(cam_index, int):
+        cap = cv2.VideoCapture(cam_index)
+        return cap
+
+    # 1. DirectShow with MJPG FourCC (prevents YUY2 stride corruption on Windows)
+    cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
+    if cap.isOpened():
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        # Flush warmup frames (exposure/gain initialization)
+        for _ in range(6):
+            ret, _ = cap.read()
+            if ret:
+                break
+            time.sleep(0.04)
+        return cap
+
+    # 2. Media Foundation (CAP_MSMF) fallback
+    cap = cv2.VideoCapture(cam_index, cv2.CAP_MSMF)
+    if cap.isOpened():
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        for _ in range(6):
+            ret, _ = cap.read()
+            if ret:
+                break
+            time.sleep(0.04)
+        return cap
+
+    # 3. Default fallback
+    cap = cv2.VideoCapture(cam_index)
+    if cap.isOpened():
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    return cap
+
+
 def main():
+    lock_file, lock_path = acquire_single_instance_lock()
+
     print("\n" + "=" * 65)
     print("🚀 AUTOMATIC ATTENDANCE ENGINE (REAL AI MODELS)")
     print("   • Person Detection: YOLOv8 (yolov8n.pt)")
@@ -105,25 +188,7 @@ def main():
         last_enrolled = matcher.enrolled_students[-1]
         print(f"   Latest enrolled: {last_enrolled.get('name')} ({last_enrolled.get('studentId')})\n")
 
-    cam_index = int(CAMERA_SOURCE) if CAMERA_SOURCE.isdigit() else CAMERA_SOURCE
-    logger.info(f"Connecting to camera source: '{CAMERA_SOURCE}'...")
-
-    if isinstance(cam_index, int):
-        # On Windows, try DirectShow (CAP_DSHOW) first for Phone Link and external cameras
-        cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
-        if not cap.isOpened():
-            logger.info(f"DirectShow open failed for camera {cam_index}, trying default backend...")
-            cap = cv2.VideoCapture(cam_index)
-        # Automatic fallback to default webcam (Camera 0) if chosen camera is offline
-        if not cap.isOpened() and cam_index != 0:
-            logger.warning(f"Camera {cam_index} unavailable. Falling back to default Laptop Webcam (0)...")
-            cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-            if not cap.isOpened():
-                cap = cv2.VideoCapture(0)
-    else:
-        # RTSP / HTTP video stream URL
-        cap = cv2.VideoCapture(cam_index)
-
+    cap = open_camera_source(CAMERA_SOURCE)
     is_mock_feed = False
     if not cap.isOpened():
         logger.warning(f"Camera source '{CAMERA_SOURCE}' could not be opened. Using test feed.")
@@ -134,6 +199,7 @@ def main():
     last_processed_time = 0.0
     last_frame_broadcast = 0.0
     last_sync_time = 0.0
+    consecutive_read_failures = 0
     recent_detections = []
     frame_count = 0
 
@@ -150,9 +216,19 @@ def main():
             # 1. Grab Frame
             if not is_mock_feed:
                 ret, frame = cap.read()
-                if not ret:
-                    time.sleep(0.1)
+                if not ret or frame is None or frame.size == 0:
+                    consecutive_read_failures += 1
+                    # Auto-recover if camera hangs or disconnects
+                    if consecutive_read_failures >= 15:
+                        logger.warning("Camera stream unresponsive. Attempting camera re-initialization...")
+                        cap.release()
+                        time.sleep(0.5)
+                        cap = open_camera_source(CAMERA_SOURCE)
+                        is_mock_feed = not cap.isOpened()
+                        consecutive_read_failures = 0
+                    time.sleep(0.05)
                     continue
+                consecutive_read_failures = 0
             else:
                 frame = np.zeros((480, 640, 3), dtype=np.uint8)
                 frame[:] = (30, 30, 35)
@@ -275,6 +351,7 @@ def main():
         cap.release()
         if SHOW_DISPLAY:
             cv2.destroyAllWindows()
+        release_single_instance_lock(lock_file, lock_path)
         logger.info("ML Worker gracefully shut down.")
 
 

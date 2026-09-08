@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { UserPlus, Users, CheckCircle, AlertCircle, Camera, Upload, RefreshCw, Sparkles, Trash2 } from 'lucide-react';
+import { UserPlus, Users, CheckCircle, AlertCircle, Camera, Upload, RefreshCw, Sparkles } from 'lucide-react';
 
 export const Enrollment = () => {
   const [studentId, setStudentId] = useState('');
@@ -9,7 +9,6 @@ export const Enrollment = () => {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState(null);
   const [enrolledList, setEnrolledList] = useState([]);
-  const [deletingId, setDeletingId] = useState(null);
 
   // Camera & Image Capture State
   const [useCamera, setUseCamera] = useState(false);
@@ -38,7 +37,7 @@ export const Enrollment = () => {
         const json = await res.json();
         setWorkerRunning(Boolean(json.running));
       }
-    } catch (e) {}
+    } catch (e) { }
   };
 
   useEffect(() => {
@@ -59,7 +58,7 @@ export const Enrollment = () => {
           await fetch('/api/worker/stop', { method: 'POST' });
           setWorkerRunning(false);
           await new Promise((r) => setTimeout(r, 600));
-        } catch (e) {}
+        } catch (e) { }
       }
 
       setUseCamera(true);
@@ -164,45 +163,6 @@ export const Enrollment = () => {
     }
   };
 
-  // Delete Individual Student
-  const handleDeleteStudent = async (id, studentName) => {
-    if (!window.confirm(`Are you sure you want to remove ${studentName || id}?`)) return;
-    try {
-      setDeletingId(id);
-      const res = await fetch(`/api/students/${id}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setMessage({ type: 'success', text: data.message || `Student ${studentName || id} removed.` });
-        fetchEnrolled();
-      } else {
-        setMessage({ type: 'error', text: data.message || 'Failed to delete student.' });
-      }
-    } catch (err) {
-      console.error('Delete error:', err);
-      setMessage({ type: 'error', text: 'Network error deleting student.' });
-    } finally {
-      setDeletingId(null);
-    }
-  };
-
-  // Clear All Enrolled Students
-  const handleClearAllStudents = async () => {
-    if (!window.confirm('Are you sure you want to remove ALL enrolled students?')) return;
-    try {
-      setLoading(true);
-      const res = await fetch('/api/students', { method: 'DELETE' });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setMessage({ type: 'success', text: 'All enrolled students removed.' });
-        fetchEnrolled();
-      }
-    } catch (err) {
-      setMessage({ type: 'error', text: 'Failed to clear students.' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
       {/* Header */}
@@ -226,11 +186,10 @@ export const Enrollment = () => {
 
             {message && (
               <div
-                className={`mb-3 p-2.5 rounded-xl text-xs flex items-center gap-2 border ${
-                  message.type === 'success'
+                className={`mb-3 p-2.5 rounded-xl text-xs flex items-center gap-2 border ${message.type === 'success'
                     ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                     : 'bg-red-50 text-red-700 border-red-200'
-                }`}
+                  }`}
               >
                 {message.type === 'success' ? (
                   <CheckCircle className="w-4 h-4 shrink-0 text-emerald-600" />
@@ -400,17 +359,6 @@ export const Enrollment = () => {
                   Enrolled Students ({enrolledList.length})
                 </h3>
               </div>
-              {enrolledList.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleClearAllStudents}
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold text-red-600 hover:bg-red-50 border border-red-200 transition-colors"
-                  title="Remove all enrolled students"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  Clear All
-                </button>
-              )}
             </div>
 
             <div className="overflow-x-auto max-h-[520px] overflow-y-auto">
@@ -420,14 +368,13 @@ export const Enrollment = () => {
                     <th className="py-3 px-5">Student</th>
                     <th className="py-3 px-5">Roll No</th>
                     <th className="py-3 px-5">Department</th>
-                    <th className="py-3 px-5">Status</th>
-                    <th className="py-3 px-5 text-right">Action</th>
+                    <th className="py-3 px-5 text-right">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-sandal-100 text-xs">
                   {enrolledList.length === 0 ? (
                     <tr>
-                      <td colSpan="5" className="py-10 text-center text-red-900/50">
+                      <td colSpan="4" className="py-10 text-center text-red-900/50">
                         No students enrolled yet.
                       </td>
                     </tr>
@@ -441,21 +388,10 @@ export const Enrollment = () => {
                           </span>
                         </td>
                         <td className="py-3 px-5 text-red-900/70 font-medium">{stu.department}</td>
-                        <td className="py-3 px-5">
+                        <td className="py-3 px-5 text-right">
                           <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
                             Enrolled
                           </span>
-                        </td>
-                        <td className="py-3 px-5 text-right">
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteStudent(stu.studentId, stu.name)}
-                            disabled={deletingId === stu.studentId}
-                            className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 border border-transparent hover:border-red-200 transition-colors disabled:opacity-50"
-                            title={`Delete ${stu.name}`}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
                         </td>
                       </tr>
                     ))

@@ -179,14 +179,12 @@ export const Dashboard = () => {
     socket.on('live_frame', handleLiveFrame);
     socket.on('worker_status', handleWorkerStatus);
     socket.on('data_reset', handleDataReset);
-    socket.on('student_deleted', fetchEnrolledCount);
 
     return () => {
       socket.off('new_attendance', handleNewAttendance);
       socket.off('live_frame', handleLiveFrame);
       socket.off('worker_status', handleWorkerStatus);
       socket.off('data_reset', handleDataReset);
-      socket.off('student_deleted', fetchEnrolledCount);
     };
   }, [socket]);
 
@@ -235,13 +233,14 @@ export const Dashboard = () => {
     }
   };
 
-  // Clear All Demo Data
+  // Clear Today's Attendance Data
   const handleClearAllData = async () => {
     try {
       setResetting(true);
       const res = await fetch('/api/system/reset', { method: 'POST' });
       if (res.ok) {
         setPresentStudents([]);
+        setLatestMatch(null);
         setShowResetModal(false);
       }
     } catch (e) {
@@ -317,16 +316,14 @@ export const Dashboard = () => {
           <h2 className="text-2xl font-black text-red-950 tracking-tight flex items-center gap-2">
             Attendance Dashboard
             <span
-              className={`text-xs px-2.5 py-0.5 rounded-full font-semibold flex items-center gap-1.5 border ${
-                workerRunning
+              className={`text-xs px-2.5 py-0.5 rounded-full font-semibold flex items-center gap-1.5 border ${workerRunning
                   ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                   : 'bg-sandal-100 text-sandal-800 border-sandal-300'
-              }`}
+                }`}
             >
               <span
-                className={`w-1.5 h-1.5 rounded-full ${
-                  workerRunning ? 'bg-emerald-500 live-pulse' : 'bg-sandal-500'
-                }`}
+                className={`w-1.5 h-1.5 rounded-full ${workerRunning ? 'bg-emerald-500 live-pulse' : 'bg-sandal-500'
+                  }`}
               />
               {workerRunning ? 'Camera Active' : 'Camera Standby'}
             </span>
@@ -342,11 +339,10 @@ export const Dashboard = () => {
           <button
             onClick={() => toggleWorker()}
             disabled={workerLoading}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95 disabled:opacity-50 border ${
-              workerRunning
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95 disabled:opacity-50 border ${workerRunning
                 ? 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100'
                 : 'bg-red-600 hover:bg-red-700 text-white border-red-600 shadow-red-600/20 shadow-md'
-            }`}
+              }`}
           >
             {workerLoading ? (
               <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -358,25 +354,26 @@ export const Dashboard = () => {
             {workerRunning ? 'Stop Camera' : 'Start Camera'}
           </button>
 
-          {/* Refresh */}
+          {/* Clear Attendance Button */}
+          <button
+            onClick={() => setShowResetModal(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-red-200 text-red-600 hover:bg-red-50 text-xs font-bold transition-all shadow-sandal-sm active:scale-95"
+            title="Clear Today's Attendance Records"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Clear Records</span>
+          </button>
+
+          {/* Refresh Attendance List */}
           <button
             onClick={() => {
               fetchTodayAttendance();
               fetchEnrolledCount();
             }}
-            className="p-2 rounded-xl bg-white border border-sandal-200 text-red-900/70 hover:text-red-600 hover:bg-sandal-50 transition-all shadow-sandal-sm"
-            title="Refresh Attendance"
+            className="p-2 rounded-xl bg-white border border-sandal-200 text-red-900/70 hover:text-red-600 hover:bg-sandal-50 transition-all shadow-sandal-sm active:scale-95"
+            title="Refresh Attendance List"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-red-600' : ''}`} />
-          </button>
-
-          {/* Clear Data */}
-          <button
-            onClick={() => setShowResetModal(true)}
-            className="p-2 rounded-xl bg-white border border-red-200 text-red-600 hover:bg-red-50 transition-all shadow-sandal-sm"
-            title="Reset demo data"
-          >
-            <Trash2 className="w-4 h-4" />
           </button>
         </div>
       </div>
@@ -565,11 +562,10 @@ export const Dashboard = () => {
             <button
               key={type}
               onClick={() => setTypeFilter(type)}
-              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all border ${
-                typeFilter === type
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all border ${typeFilter === type
                   ? 'bg-red-600 text-white border-red-600 shadow-sm'
                   : 'bg-sandal-50 text-red-900/70 border-sandal-200 hover:bg-sandal-100'
-              }`}
+                }`}
             >
               {type === 'ALL' ? 'All' : type === 'MULTIMODAL' ? 'Face + Body' : 'Face Only'}
             </button>
@@ -619,9 +615,8 @@ export const Dashboard = () => {
                   return (
                     <tr
                       key={item._id || item.studentId}
-                      className={`transition-colors duration-300 hover:bg-sandal-50/60 ${
-                        isNew ? 'bg-red-50' : ''
-                      }`}
+                      className={`transition-colors duration-300 hover:bg-sandal-50/60 ${isNew ? 'bg-red-50' : ''
+                        }`}
                     >
                       {/* Photo Thumbnail + Student Info */}
                       <td className="py-3 px-5">
@@ -701,8 +696,8 @@ export const Dashboard = () => {
                 <AlertTriangle className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-red-950">Reset Demo Data?</h3>
-                <p className="text-xs text-red-900/60">This will clear today's attendance.</p>
+                <h3 className="text-sm font-bold text-red-950">Clear Today's Attendance Records?</h3>
+                <p className="text-xs text-red-900/60">This will reset all attendance entries logged today.</p>
               </div>
             </div>
 
@@ -716,9 +711,19 @@ export const Dashboard = () => {
               <button
                 onClick={handleClearAllData}
                 disabled={resetting}
-                className="px-3.5 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-sm transition-all disabled:opacity-50"
+                className="px-3.5 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-sm transition-all disabled:opacity-50 flex items-center gap-1.5"
               >
-                {resetting ? 'Clearing...' : 'Clear Data'}
+                {resetting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    Clearing...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Clear Records
+                  </>
+                )}
               </button>
             </div>
           </div>

@@ -1,6 +1,8 @@
 const { spawn, exec } = require('child_process');
 const path = require('path');
-const { clearAttendanceData } = require('../config/dataStore');
+const fs = require('fs');
+const { clearAttendanceData, isMongoConnected } = require('../config/dataStore');
+const { clearRecentMatchCache } = require('./attendanceController');
 const Student = require('../models/Student');
 const AttendanceLog = require('../models/AttendanceLog');
 
@@ -16,6 +18,34 @@ const pushLog = (line) => {
   }
 };
 
+const killExistingWorker = () => {
+  if (workerProcess) {
+    const pid = workerProcess.pid;
+    if (process.platform === 'win32') {
+      try { exec(`taskkill /pid ${pid} /T /F`); } catch (e) {}
+    } else {
+      try { workerProcess.kill('SIGTERM'); } catch (e) {}
+    }
+    workerProcess = null;
+  }
+
+  // Also check ml_worker.lock PID if file exists
+  try {
+    const lockPath = path.resolve(__dirname, '../../../ml-engine/ml_worker.lock');
+    if (fs.existsSync(lockPath)) {
+      const pid = parseInt(fs.readFileSync(lockPath, 'utf8').trim(), 10);
+      if (pid && !isNaN(pid)) {
+        if (process.platform === 'win32') {
+          try { exec(`taskkill /pid ${pid} /T /F`); } catch (e) {}
+        } else {
+          try { process.kill(pid, 'SIGTERM'); } catch (e) {}
+        }
+      }
+      try { fs.unlinkSync(lockPath); } catch (e) {}
+    }
+  } catch (e) {}
+};
+
 /**
  * @route   POST /api/worker/start
  * @desc    Start the python ml_worker.py process from the dashboard
@@ -26,27 +56,17 @@ const startWorker = (req, res) => {
       ? String(req.body.cameraSource).trim()
       : (activeCameraSource || '0');
 
-    if (workerProcess) {
-      // If the camera source is unchanged, worker is already running on it
-      if (requestedCamera === activeCameraSource) {
-        return res.status(200).json({
-          success: true,
-          message: `Worker is already running on Camera ${activeCameraSource}.`,
-          pid: workerProcess.pid,
-          cameraSource: activeCameraSource,
-        });
-      }
-
-      // Camera source changed while running - terminate old process first to switch
-      console.log(`[Worker Manager] Camera switch requested: ${activeCameraSource} -> ${requestedCamera}`);
-      const oldPid = workerProcess.pid;
-      if (process.platform === 'win32') {
-        exec(`taskkill /pid ${oldPid} /T /F`);
-      } else {
-        workerProcess.kill('SIGTERM');
-      }
-      workerProcess = null;
+    if (workerProcess && requestedCamera === activeCameraSource) {
+      return res.status(200).json({
+        success: true,
+        message: `Worker is already running on Camera ${activeCameraSource}.`,
+        pid: workerProcess.pid,
+        cameraSource: activeCameraSource,
+      });
     }
+
+    // Always clean up any previously running instance before starting
+    killExistingWorker();
 
     activeCameraSource = requestedCamera;
     const cwd = path.resolve(__dirname, '../../../ml-engine');
@@ -119,29 +139,7 @@ const startWorker = (req, res) => {
  */
 const stopWorker = (req, res) => {
   try {
-    if (!workerProcess) {
-      return res.status(200).json({
-        success: true,
-        message: 'Worker is not currently running.',
-        cameraSource: activeCameraSource,
-      });
-    }
-
-    const pid = workerProcess.pid;
-    console.log(`[Worker Manager] Stopping worker PID: ${pid}`);
-
-    // On Windows, use taskkill to terminate tree
-    if (process.platform === 'win32') {
-      exec(`taskkill /pid ${pid} /T /F`, (err) => {
-        if (err) {
-          console.warn(`[Worker Manager] Taskkill warning: ${err.message}`);
-        }
-      });
-    } else {
-      workerProcess.kill('SIGTERM');
-    }
-
-    workerProcess = null;
+    killExistingWorker();
 
     const io = req.app.get('io');
     if (io) {
@@ -202,11 +200,14 @@ const resetSystemData = async (req, res) => {
   try {
     console.log('[System Reset] Clearing attendance records...');
     clearAttendanceData();
+    clearRecentMatchCache();
 
-    try {
-      await AttendanceLog.deleteMany({});
-    } catch (e) {
-      // MongoDB might not be running
+    if (isMongoConnected()) {
+      try {
+        await AttendanceLog.deleteMany({});
+      } catch (e) {
+        console.warn('[System Reset] MongoDB deleteMany error:', e.message);
+      }
     }
 
     const io = req.app.get('io');
