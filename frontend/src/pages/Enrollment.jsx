@@ -146,7 +146,7 @@ export const Enrollment = () => {
       if (res.ok && data.success) {
         setMessage({
           type: 'success',
-          text: `Student ${name} successfully enrolled with real FaceNet 512-d embeddings!`,
+          text: `Student ${name} successfully enrolled!`,
         });
         setStudentId('');
         setName('');
@@ -164,54 +164,51 @@ export const Enrollment = () => {
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+      {/* Header */}
       <div className="mb-6">
-        <h2 className="text-2xl font-extrabold text-white tracking-tight flex items-center gap-2.5">
-          Student Facial Enrollment
-          <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold flex items-center gap-1">
-            <Sparkles className="w-3 h-3 text-emerald-400" />
-            PyTorch FaceNet 512-d Active
-          </span>
+        <h2 className="text-2xl font-black text-red-950 tracking-tight flex items-center gap-2">
+          Enroll Student
         </h2>
-        <p className="text-sm text-slate-400 mt-1">
-          Capture real face photos via webcam or upload an image. The system extracts real 512-dimensional facial embedding vectors using FaceNet (InceptionResnetV1).
+        <p className="text-xs text-red-900/60 mt-0.5">
+          Add new student profiles and face photos for recognition
         </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Enrollment Form */}
         <div className="lg:col-span-1">
-          <div className="glass-panel rounded-2xl p-6 border border-white/10 shadow-xl">
-            <h3 className="text-base font-bold text-white mb-4 flex items-center gap-2">
-              <UserPlus className="w-5 h-5 text-brand-400" />
-              Enroll Real Student Face
+          <div className="bg-white rounded-2xl p-5 border border-sandal-200 shadow-sandal-sm">
+            <h3 className="text-sm font-bold text-red-950 mb-3 flex items-center gap-2">
+              <UserPlus className="w-4 h-4 text-red-600" />
+              Student Details
             </h3>
 
             {message && (
               <div
-                className={`mb-4 p-3 rounded-xl text-xs flex items-center gap-2 border ${
+                className={`mb-3 p-2.5 rounded-xl text-xs flex items-center gap-2 border ${
                   message.type === 'success'
-                    ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
-                    : 'bg-rose-500/10 text-rose-300 border-rose-500/20'
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    : 'bg-red-50 text-red-700 border-red-200'
                 }`}
               >
                 {message.type === 'success' ? (
-                  <CheckCircle className="w-4 h-4 shrink-0" />
+                  <CheckCircle className="w-4 h-4 shrink-0 text-emerald-600" />
                 ) : (
-                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
                 )}
                 <span>{message.text}</span>
               </div>
             )}
 
-            {/* Webcam / Image Capture Section */}
-            <div className="mb-4">
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5 uppercase">
-                Face Photo (Real Model Extraction)
+            {/* Photo Capture Section */}
+            <div className="mb-3">
+              <label className="block text-xs font-semibold text-red-950 mb-1">
+                Student Photo
               </label>
 
               {useCamera ? (
-                <div className="relative rounded-xl overflow-hidden border border-brand-500/50 bg-black aspect-[4/3] flex items-center justify-center">
+                <div className="relative rounded-xl overflow-hidden border border-sandal-300 bg-sandal-50 aspect-[4/3] flex items-center justify-center shadow-inner">
                   <video
                     ref={videoRef}
                     autoPlay
@@ -223,32 +220,32 @@ export const Enrollment = () => {
                     <button
                       type="button"
                       onClick={snapPhoto}
-                      className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs shadow-lg flex items-center gap-1.5"
+                      className="px-3.5 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs shadow-md shadow-red-600/20 flex items-center gap-1.5"
                     >
                       <Camera className="w-3.5 h-3.5" />
-                      Take Photo
+                      Capture
                     </button>
                     <button
                       type="button"
                       onClick={stopCamera}
-                      className="px-3 py-2 rounded-xl bg-dark-900/80 hover:bg-dark-900 text-slate-300 text-xs border border-white/10"
+                      className="px-3 py-1.5 rounded-xl bg-white hover:bg-sandal-100 text-red-900 text-xs font-semibold border border-sandal-200"
                     >
                       Cancel
                     </button>
                   </div>
                 </div>
               ) : capturedImage ? (
-                <div className="relative rounded-xl overflow-hidden border border-emerald-500/40 bg-dark-900 aspect-[4/3]">
+                <div className="relative rounded-xl overflow-hidden border border-sandal-300 bg-sandal-50 aspect-[4/3] shadow-inner">
                   <img
                     src={capturedImage}
-                    alt="Captured Face"
+                    alt="Student Face"
                     className="w-full h-full object-cover"
                   />
                   <div className="absolute bottom-2 right-2">
                     <button
                       type="button"
                       onClick={() => setCapturedImage(null)}
-                      className="px-2.5 py-1 rounded-lg bg-black/70 hover:bg-black text-xs text-rose-300 border border-white/10"
+                      className="px-2.5 py-1 rounded-lg bg-white/90 hover:bg-white text-xs text-red-700 font-semibold border border-red-200 shadow-sm"
                     >
                       Retake
                     </button>
@@ -259,15 +256,15 @@ export const Enrollment = () => {
                   <button
                     type="button"
                     onClick={startCamera}
-                    className="flex flex-col items-center justify-center p-4 rounded-xl border border-white/10 bg-dark-900/80 hover:border-brand-500/50 hover:bg-dark-900 transition-all text-center gap-2 group"
+                    className="flex flex-col items-center justify-center p-3.5 rounded-xl border border-sandal-200 bg-sandal-50 hover:bg-sandal-100 hover:border-sandal-300 transition-all text-center gap-1.5 group"
                   >
-                    <Camera className="w-5 h-5 text-brand-400 group-hover:scale-110 transition-transform" />
-                    <span className="text-xs font-medium text-slate-300">Open Webcam</span>
+                    <Camera className="w-4 h-4 text-red-600 group-hover:scale-110 transition-transform" />
+                    <span className="text-xs font-bold text-red-950">Open Camera</span>
                   </button>
 
-                  <label className="flex flex-col items-center justify-center p-4 rounded-xl border border-white/10 bg-dark-900/80 hover:border-brand-500/50 hover:bg-dark-900 transition-all text-center gap-2 cursor-pointer group">
-                    <Upload className="w-5 h-5 text-accent-cyan group-hover:scale-110 transition-transform" />
-                    <span className="text-xs font-medium text-slate-300">Upload Photo</span>
+                  <label className="flex flex-col items-center justify-center p-3.5 rounded-xl border border-sandal-200 bg-sandal-50 hover:bg-sandal-100 hover:border-sandal-300 transition-all text-center gap-1.5 cursor-pointer group">
+                    <Upload className="w-4 h-4 text-red-600 group-hover:scale-110 transition-transform" />
+                    <span className="text-xs font-bold text-red-950">Upload Photo</span>
                     <input
                       type="file"
                       accept="image/*"
@@ -279,10 +276,10 @@ export const Enrollment = () => {
               )}
             </div>
 
-            <form onSubmit={handleEnroll} className="space-y-4">
+            <form onSubmit={handleEnroll} className="space-y-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5 uppercase">
-                  Student ID / Roll No. *
+                <label className="block text-xs font-semibold text-red-950 mb-1">
+                  Student ID / Roll No *
                 </label>
                 <input
                   type="text"
@@ -290,62 +287,62 @@ export const Enrollment = () => {
                   placeholder="e.g. STU101"
                   value={studentId}
                   onChange={(e) => setStudentId(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-xl bg-dark-900 border border-white/10 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-brand-500"
+                  className="w-full px-3 py-1.5 rounded-xl bg-sandal-50 border border-sandal-200 text-xs text-red-950 placeholder-red-900/40 focus:outline-none focus:border-red-500 transition-colors"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5 uppercase">
+                <label className="block text-xs font-semibold text-red-950 mb-1">
                   Full Name *
                 </label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Bharath Kumar"
+                  placeholder="e.g. Alex Johnson"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-xl bg-dark-900 border border-white/10 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-brand-500"
+                  className="w-full px-3 py-1.5 rounded-xl bg-sandal-50 border border-sandal-200 text-xs text-red-950 placeholder-red-900/40 focus:outline-none focus:border-red-500 transition-colors"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5 uppercase">
+                <label className="block text-xs font-semibold text-red-950 mb-1">
                   Department
                 </label>
                 <input
                   type="text"
                   value={department}
                   onChange={(e) => setDepartment(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-xl bg-dark-900 border border-white/10 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-brand-500"
+                  className="w-full px-3 py-1.5 rounded-xl bg-sandal-50 border border-sandal-200 text-xs text-red-950 placeholder-red-900/40 focus:outline-none focus:border-red-500 transition-colors"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5 uppercase">
+                <label className="block text-xs font-semibold text-red-950 mb-1">
                   Email
                 </label>
                 <input
                   type="email"
-                  placeholder="student@university.edu"
+                  placeholder="alex@university.edu"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-xl bg-dark-900 border border-white/10 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-brand-500"
+                  className="w-full px-3 py-1.5 rounded-xl bg-sandal-50 border border-sandal-200 text-xs text-red-950 placeholder-red-900/40 focus:outline-none focus:border-red-500 transition-colors"
                 />
               </div>
 
-              <div className="pt-2">
+              <div className="pt-1">
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full py-2.5 rounded-xl bg-gradient-to-r from-brand-600 to-accent-cyan text-white text-xs font-bold uppercase tracking-wider hover:opacity-90 transition-all shadow-lg shadow-brand-500/20 disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="w-full py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-all shadow-md shadow-red-600/20 disabled:opacity-50 flex items-center justify-center gap-1.5"
                 >
                   {loading ? (
                     <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      Extracting Real FaceNet Vector...
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      Enrolling...
                     </>
                   ) : (
-                    'Enroll with Real FaceNet Model'
+                    'Enroll Student'
                   )}
                 </button>
               </div>
@@ -355,47 +352,46 @@ export const Enrollment = () => {
 
         {/* Enrolled Students Table */}
         <div className="lg:col-span-2">
-          <div className="glass-panel rounded-2xl border border-white/10 overflow-hidden shadow-xl">
-            <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between">
+          <div className="bg-white rounded-2xl border border-sandal-200 overflow-hidden shadow-sandal-sm">
+            <div className="px-5 py-3.5 border-b border-sandal-200 flex items-center justify-between bg-sandal-50/50">
               <div className="flex items-center gap-2">
-                <Users className="w-4 h-4 text-brand-400" />
-                <h3 className="text-sm font-bold text-white tracking-wide uppercase">
-                  Enrolled Students Cohort ({enrolledList.length} / 65)
+                <Users className="w-4 h-4 text-red-600" />
+                <h3 className="text-sm font-bold text-red-950">
+                  Enrolled Students ({enrolledList.length})
                 </h3>
               </div>
             </div>
 
-            <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+            <div className="overflow-x-auto max-h-[520px] overflow-y-auto">
               <table className="w-full text-left border-collapse">
-                <thead className="sticky top-0 bg-dark-900">
-                  <tr className="border-b border-white/5 text-xs font-semibold uppercase tracking-wider text-slate-400">
-                    <th className="py-3 px-6">Student</th>
-                    <th className="py-3 px-6">ID</th>
-                    <th className="py-3 px-6">Department</th>
-                    <th className="py-3 px-6">Feature Embeddings</th>
+                <thead className="sticky top-0 bg-sandal-50 border-b border-sandal-200 text-xs font-semibold text-red-900/70 uppercase tracking-wider">
+                  <tr>
+                    <th className="py-3 px-5">Student</th>
+                    <th className="py-3 px-5">Roll No</th>
+                    <th className="py-3 px-5">Department</th>
+                    <th className="py-3 px-5 text-right">Status</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/5 text-sm">
+                <tbody className="divide-y divide-sandal-100 text-xs">
                   {enrolledList.length === 0 ? (
                     <tr>
-                      <td colSpan="4" className="py-8 text-center text-slate-500 text-xs">
-                        No students enrolled in database yet.
+                      <td colSpan="4" className="py-10 text-center text-red-900/50">
+                        No students enrolled yet.
                       </td>
                     </tr>
                   ) : (
                     enrolledList.map((stu) => (
-                      <tr key={stu._id || stu.studentId} className="hover:bg-white/[0.02]">
-                        <td className="py-3.5 px-6 font-semibold text-slate-200">{stu.name}</td>
-                        <td className="py-3.5 px-6">
-                          <span className="font-mono text-xs px-2 py-0.5 rounded bg-dark-900 text-brand-400 border border-white/5">
+                      <tr key={stu._id || stu.studentId} className="hover:bg-sandal-50/60 transition-colors">
+                        <td className="py-3 px-5 font-bold text-red-950">{stu.name}</td>
+                        <td className="py-3 px-5">
+                          <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-sandal-100 text-red-700 border border-sandal-200">
                             {stu.studentId}
                           </span>
                         </td>
-                        <td className="py-3.5 px-6 text-xs text-slate-400">{stu.department}</td>
-                        <td className="py-3.5 px-6">
-                          <span className="inline-flex items-center gap-1 text-xs text-emerald-400 font-medium bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                            <Sparkles className="w-3 h-3" />
-                            512-d FaceNet
+                        <td className="py-3 px-5 text-red-900/70 font-medium">{stu.department}</td>
+                        <td className="py-3 px-5 text-right">
+                          <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                            Enrolled
                           </span>
                         </td>
                       </tr>

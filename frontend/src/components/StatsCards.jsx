@@ -8,78 +8,78 @@ export const StatsCards = ({ stats, totalCapacity = 65 }) => {
 
   const cards = [
     {
-      label: 'Class Attendance',
+      label: 'Attendance',
       value: `${stats.totalPresent} / ${totalCapacity}`,
-      subtext: `${attendanceRate}% cohort present`,
+      subtext: `${attendanceRate}% Present`,
       icon: Users,
-      color: 'text-brand-400',
-      bg: 'bg-brand-500/10 border-brand-500/20',
+      color: 'text-red-600',
+      bg: 'bg-red-50 border-red-200',
       progress: attendanceRate,
     },
     {
-      label: 'Multimodal Matches',
+      label: 'Verified',
       value: stats.multimodalCount,
-      subtext: 'Dual Face + Body validated',
+      subtext: 'Face + Body',
       icon: ShieldCheck,
-      color: 'text-emerald-400',
-      bg: 'bg-emerald-500/10 border-emerald-500/20',
+      color: 'text-red-600',
+      bg: 'bg-sandal-100 border-sandal-300',
     },
     {
-      label: 'Face-Only Matches',
+      label: 'Face Match',
       value: stats.faceCount,
-      subtext: 'Direct facial crop verification',
+      subtext: 'Facial recognition',
       icon: ScanFace,
-      color: 'text-accent-violet',
-      bg: 'bg-violet-500/10 border-violet-500/20',
+      color: 'text-sandal-600',
+      bg: 'bg-sandal-100 border-sandal-300',
     },
     {
-      label: 'Avg Model Confidence',
-      value: `${(stats.avgConfidence * 100).toFixed(1)}%`,
-      subtext: 'YOLOv8 + DeepFace score',
+      label: 'Accuracy',
+      value: `${(stats.avgConfidence * 100).toFixed(0)}%`,
+      subtext: 'Average score',
       icon: Activity,
-      color: 'text-accent-cyan',
-      bg: 'bg-cyan-500/10 border-cyan-500/20',
+      color: 'text-red-600',
+      bg: 'bg-red-50 border-red-200',
     },
   ];
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 mb-6">
       {cards.map((card, idx) => {
         const Icon = card.icon;
         return (
           <div
             key={idx}
-            className="glass-card rounded-2xl p-5 hover:border-white/20 transition-all shadow-lg group"
+            className="bg-white rounded-2xl p-4 border border-sandal-200 shadow-sandal-sm hover:shadow-sandal-md hover:border-sandal-300 transition-all group"
           >
-            <div className="flex items-start justify-between mb-3">
+            <div className="flex items-start justify-between mb-2">
               <div>
-                <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">
+                <span className="text-xs font-semibold text-red-900/60 uppercase tracking-wider">
                   {card.label}
                 </span>
-                <div className="text-2xl font-extrabold text-white mt-1 group-hover:scale-105 transition-transform origin-left">
+                <div className="text-2xl font-black text-red-950 mt-0.5 group-hover:text-red-600 transition-colors">
                   {card.value}
                 </div>
               </div>
-              <div className={`p-2.5 rounded-xl border ${card.bg}`}>
-                <Icon className={`w-5 h-5 ${card.color}`} />
+              <div className={`p-2 rounded-xl border ${card.bg}`}>
+                <Icon className={`w-4 h-4 ${card.color}`} />
               </div>
             </div>
 
             {card.progress !== undefined ? (
-              <div className="space-y-1.5 mt-2">
-                <div className="w-full bg-dark-900 rounded-full h-1.5 overflow-hidden">
+              <div className="space-y-1 mt-2">
+                <div className="w-full bg-sandal-100 rounded-full h-1.5 overflow-hidden">
                   <div
-                    className="bg-gradient-to-r from-brand-500 to-emerald-400 h-1.5 rounded-full transition-all duration-500"
+                    className="bg-gradient-to-r from-sandal-400 to-red-600 h-1.5 rounded-full transition-all duration-500"
                     style={{ width: `${card.progress}%` }}
                   />
                 </div>
-                <div className="text-xs text-slate-400 flex justify-between">
+                <div className="text-[11px] text-red-900/60 flex justify-between font-medium">
                   <span>{card.subtext}</span>
-                  <span className="font-semibold text-slate-300">{card.progress}%</span>
+                  <span className="font-bold text-red-600">{card.progress}%</span>
                 </div>
               </div>
             ) : (
-              <p className="text-xs text-slate-400">{card.subtext}</p>
+              <p className="text-[11px] text-red-900/60 font-medium">{card.subtext}</p>
             )}
           </div>
         );
@@ -87,3 +87,6 @@ export const StatsCards = ({ stats, totalCapacity = 65 }) => {
     </div>
   );
 };
+
+export default StatsCards;
+

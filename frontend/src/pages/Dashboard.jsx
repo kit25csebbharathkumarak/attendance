@@ -292,88 +292,70 @@ export const Dashboard = () => {
   const latestMatch = presentStudents[0] || null;
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-      {/* Top Header Banner */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h2 className="text-2xl font-extrabold text-white tracking-tight flex items-center gap-2.5">
-            Walk-Through Attendance Monitor
+          <h2 className="text-2xl font-black text-red-950 tracking-tight flex items-center gap-2">
+            Attendance Dashboard
             <span
               className={`text-xs px-2.5 py-0.5 rounded-full font-semibold flex items-center gap-1.5 border ${
                 workerRunning
-                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                  : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  : 'bg-sandal-100 text-sandal-800 border-sandal-300'
               }`}
             >
               <span
                 className={`w-1.5 h-1.5 rounded-full ${
-                  workerRunning ? 'bg-emerald-400 live-pulse' : 'bg-amber-400'
+                  workerRunning ? 'bg-emerald-500 live-pulse' : 'bg-sandal-500'
                 }`}
               />
-              {workerRunning ? `AI Worker Active (PID: ${workerPid || 'Running'})` : 'AI Worker Idle'}
+              {workerRunning ? 'Camera Active' : 'Camera Standby'}
             </span>
           </h2>
-          <p className="text-sm text-slate-400 mt-1">
-            Real-time YOLOv8 + FaceNet 512-d biometric entrance monitoring with live video stream.
+          <p className="text-xs text-red-900/60 mt-0.5">
+            Automatic walk-through attendance tracking
           </p>
         </div>
 
-        {/* Master Control Buttons */}
-        <div className="flex flex-wrap items-center gap-2.5">
-          {/* Camera Source Selector */}
-          <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-dark-900 border border-white/10 text-xs shadow-md">
-            <Smartphone className="w-4 h-4 text-brand-400 shrink-0" />
-            <span className="text-slate-400 font-semibold hidden sm:inline">Camera:</span>
-            <select
-              value={cameraSource}
-              onChange={(e) => handleCameraChange(e.target.value)}
-              className="bg-transparent text-slate-100 font-semibold focus:outline-none cursor-pointer pr-1 text-xs"
-            >
-              {availableCameras.map((cam) => (
-                <option key={cam.id} value={cam.id} className="bg-dark-950 text-slate-200">
-                  {cam.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Start/Stop ML Worker Button */}
+        {/* Action Controls */}
+        <div className="flex items-center gap-2">
+          {/* Start/Stop Camera Button */}
           <button
             onClick={() => toggleWorker()}
             disabled={workerLoading}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all shadow-lg active:scale-95 disabled:opacity-50 ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95 disabled:opacity-50 border ${
               workerRunning
-                ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-rose-600/30'
-                : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30'
+                ? 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100'
+                : 'bg-red-600 hover:bg-red-700 text-white border-red-600 shadow-red-600/20 shadow-md'
             }`}
           >
             {workerLoading ? (
-              <RefreshCw className="w-4 h-4 animate-spin" />
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
             ) : workerRunning ? (
-              <Square className="w-4 h-4 fill-current" />
+              <Square className="w-3.5 h-3.5 fill-current" />
             ) : (
-              <Play className="w-4 h-4 fill-current" />
+              <Play className="w-3.5 h-3.5 fill-current" />
             )}
-            {workerRunning ? 'Stop ML Camera Worker' : 'Start ML Camera Worker'}
+            {workerRunning ? 'Stop Camera' : 'Start Camera'}
           </button>
 
-          {/* Refresh Table */}
+          {/* Refresh */}
           <button
             onClick={fetchTodayAttendance}
-            className="p-2.5 rounded-xl bg-dark-900 border border-white/10 text-slate-300 hover:text-white hover:bg-white/5 transition-all"
-            title="Refresh Attendance Logs"
+            className="p-2 rounded-xl bg-white border border-sandal-200 text-red-900/70 hover:text-red-600 hover:bg-sandal-50 transition-all shadow-sandal-sm"
+            title="Refresh Attendance"
           >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-brand-400' : ''}`} />
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-red-600' : ''}`} />
           </button>
 
-          {/* Reset All Data Button */}
+          {/* Clear Data */}
           <button
             onClick={() => setShowResetModal(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-dark-900 border border-rose-500/30 text-rose-300 hover:bg-rose-500/10 text-xs font-semibold transition-all"
-            title="Clear all demo students and attendance logs to enroll freshly"
+            className="p-2 rounded-xl bg-white border border-red-200 text-red-600 hover:bg-red-50 transition-all shadow-sandal-sm"
+            title="Reset demo data"
           >
-            <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-            Clear Demo Data
+            <Trash2 className="w-4 h-4" />
           </button>
         </div>
       </div>
@@ -381,55 +363,33 @@ export const Dashboard = () => {
       {/* KPI Stats Overview */}
       <StatsCards stats={stats} totalCapacity={65} />
 
-      {/* Live Video Feed & Latest Verification Spotlight Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+      {/* Live Video & Latest Match Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-6">
         {/* Live Camera Stream Panel */}
-        <div className="lg:col-span-2 glass-panel rounded-2xl p-5 border border-white/10 shadow-xl flex flex-col">
+        <div className="lg:col-span-2 bg-white rounded-2xl p-4 border border-sandal-200 shadow-sandal-sm flex flex-col">
+          {/* Stream Header & Camera Selector */}
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <Camera className="w-4 h-4 text-brand-400" />
-              <h3 className="text-sm font-bold text-white uppercase tracking-wide">
-                Entrance Camera Live Stream (Classroom 301)
-              </h3>
+              <div className="w-7 h-7 rounded-lg bg-red-50 text-red-600 flex items-center justify-center">
+                <Camera className="w-4 h-4" />
+              </div>
+              <h3 className="text-sm font-bold text-red-950">Live Camera Stream</h3>
             </div>
-            <span
-              className={`text-xs px-2.5 py-0.5 rounded-full font-medium flex items-center gap-1 border ${
-                isStreamActive
-                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                  : 'bg-brand-500/10 text-brand-400 border-brand-500/20'
-              }`}
-            >
-              <Eye className="w-3 h-3" />
-              {isStreamActive ? `Live Camera Feed (Cam ${cameraSource})` : workerRunning ? 'Connecting Stream...' : 'Worker Standby'}
-            </span>
-          </div>
 
-          {/* Quick Camera Switcher Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-xl bg-dark-900/80 border border-white/5 mb-3">
-            <div className="flex items-center gap-1.5 text-xs text-slate-400">
-              <Smartphone className="w-3.5 h-3.5 text-brand-400" />
-              <span className="font-semibold text-slate-300">Quick Select Camera:</span>
-            </div>
-            <div className="flex flex-wrap items-center gap-1.5">
-              {[
-                { id: '1', label: '📱 Phone Link (Cam 1)' },
-                { id: '2', label: '📱 Phone Link (Cam 2)' },
-                { id: '0', label: '💻 Laptop Webcam (0)' },
-                { id: 'custom', label: '🌐 IP / RTSP' },
-              ].map((opt) => (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => handleCameraChange(opt.id)}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
-                    cameraSource === opt.id
-                      ? 'bg-brand-500 text-white shadow-md shadow-brand-500/30 ring-1 ring-white/30'
-                      : 'bg-dark-850 hover:bg-dark-800 text-slate-300 border border-white/5'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
+            {/* Camera Dropdown */}
+            <div className="flex items-center gap-1.5 bg-sandal-50 px-2.5 py-1 rounded-xl border border-sandal-200 text-xs">
+              <span className="text-red-900/60 font-medium">Source:</span>
+              <select
+                value={cameraSource}
+                onChange={(e) => handleCameraChange(e.target.value)}
+                className="bg-transparent text-red-950 font-bold focus:outline-none cursor-pointer pr-1 text-xs"
+              >
+                {availableCameras.map((cam) => (
+                  <option key={cam.id} value={cam.id} className="bg-white text-red-950">
+                    {cam.label}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
@@ -438,59 +398,60 @@ export const Dashboard = () => {
             <div className="flex items-center gap-2 mb-3">
               <input
                 type="text"
-                placeholder="e.g. http://192.168.1.15:8080/video or rtsp://..."
+                placeholder="RTSP or HTTP stream URL..."
                 value={customIpUrl}
                 onChange={(e) => setCustomIpUrl(e.target.value)}
-                className="flex-1 px-3 py-1.5 rounded-xl bg-dark-900 border border-white/10 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-brand-500"
+                className="flex-1 px-3 py-1.5 rounded-xl bg-sandal-50 border border-sandal-200 text-xs text-red-950 placeholder-red-900/40 focus:outline-none focus:border-red-500"
               />
               <button
                 type="button"
                 onClick={() => toggleWorker(customIpUrl)}
                 disabled={workerLoading || !customIpUrl}
-                className="px-3 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold transition-all disabled:opacity-50"
+                className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-all disabled:opacity-50"
               >
-                Connect Stream
+                Connect
               </button>
             </div>
           )}
 
-          <div className="relative rounded-xl overflow-hidden bg-black aspect-video flex items-center justify-center border border-white/10 shadow-inner">
+          {/* Viewport Box (Zero Navy/Black - Warm Sandal Standby) */}
+          <div className="relative rounded-xl overflow-hidden bg-sandal-50/80 border border-sandal-200 aspect-video flex items-center justify-center shadow-inner">
             {isStreamActive ? (
               <>
                 <img
                   src={liveFrame}
-                  alt="Live Camera Feed"
+                  alt="Live Camera Stream"
                   className="w-full h-full object-cover"
                 />
-                {/* On-screen HUD Bar */}
-                <div className="absolute top-3 left-3 px-3 py-1 rounded-lg bg-black/80 backdrop-blur-md border border-emerald-500/30 text-xs text-emerald-400 font-semibold flex items-center gap-1.5 shadow-lg">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 live-pulse" />
-                  YOLOv8 + FaceNet Active • Camera [{cameraSource === '1' ? '1 (Phone Link)' : cameraSource === '2' ? '2 (Phone Link)' : cameraSource === '0' ? '0 (Laptop Webcam)' : cameraSource}]
+                {/* On-screen Live Pill */}
+                <div className="absolute top-3 left-3 px-2.5 py-1 rounded-lg bg-white/90 backdrop-blur-md border border-red-200 text-xs text-red-600 font-bold flex items-center gap-1.5 shadow-sm">
+                  <span className="w-2 h-2 rounded-full bg-red-600 live-pulse" />
+                  Live Feed
                 </div>
               </>
             ) : (
-              <div className="flex flex-col items-center justify-center gap-3 p-6 text-center text-slate-400">
-                <div className="w-14 h-14 rounded-2xl bg-dark-900 border border-white/10 flex items-center justify-center shadow-lg">
-                  <Camera className="w-7 h-7 text-slate-500" />
+              <div className="flex flex-col items-center justify-center gap-2.5 p-6 text-center">
+                <div className="w-12 h-12 rounded-2xl bg-white border border-sandal-300 flex items-center justify-center text-red-600 shadow-sm">
+                  <Camera className="w-6 h-6" />
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-slate-200">
-                    {workerRunning ? `Connecting to Camera ${cameraSource}...` : 'Live Camera Stream Offline'}
+                  <p className="text-sm font-bold text-red-950">
+                    {workerRunning ? 'Connecting to camera...' : 'Camera Standby'}
                   </p>
-                  <p className="text-xs text-slate-500 mt-1 max-w-sm">
+                  <p className="text-xs text-red-900/60 mt-0.5">
                     {workerRunning
-                      ? `Camera ${cameraSource} is warming up. If you are using Phone Link, ensure the Phone Link camera is streaming on your phone.`
-                      : 'Select your preferred camera (e.g. Phone Link Cam 1 or Webcam 0) and click Start ML Camera Worker.'}
+                      ? 'Stream initializing'
+                      : 'Click start to begin recognition'}
                   </p>
                 </div>
                 {!workerRunning && (
                   <button
                     onClick={() => toggleWorker()}
                     disabled={workerLoading}
-                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-md transition-all flex items-center gap-1.5"
+                    className="mt-1 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-md shadow-red-600/20 transition-all flex items-center gap-1.5"
                   >
                     <Play className="w-3.5 h-3.5 fill-current" />
-                    Start Camera Feed ({cameraSource === '1' ? 'Phone Link' : `Camera ${cameraSource}`})
+                    Start Camera
                   </button>
                 )}
               </div>
@@ -499,18 +460,18 @@ export const Dashboard = () => {
         </div>
 
         {/* Latest Verified Match Spotlight */}
-        <div className="lg:col-span-1 glass-panel rounded-2xl p-5 border border-white/10 shadow-xl flex flex-col justify-between">
+        <div className="lg:col-span-1 bg-white rounded-2xl p-4 border border-sandal-200 shadow-sandal-sm flex flex-col justify-between">
           <div>
             <div className="flex items-center gap-2 mb-3">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <h3 className="text-sm font-bold text-white uppercase tracking-wide">
-                Latest Verified Match
-              </h3>
+              <div className="w-7 h-7 rounded-lg bg-red-50 text-red-600 flex items-center justify-center">
+                <ShieldCheck className="w-4 h-4" />
+              </div>
+              <h3 className="text-sm font-bold text-red-950">Recent Match</h3>
             </div>
 
             {latestMatch ? (
-              <div className="space-y-4">
-                <div className="relative rounded-xl overflow-hidden border border-emerald-500/40 aspect-[4/3] bg-dark-900 flex items-center justify-center">
+              <div className="space-y-3">
+                <div className="relative rounded-xl overflow-hidden border border-sandal-200 aspect-[4/3] bg-sandal-50 flex items-center justify-center shadow-inner">
                   {latestMatch.photo ? (
                     <img
                       src={latestMatch.photo}
@@ -519,44 +480,46 @@ export const Dashboard = () => {
                     />
                   ) : (
                     <div className="flex flex-col items-center justify-center gap-2">
-                      <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-brand-600 to-accent-violet flex items-center justify-center text-white text-xl font-bold">
+                      <div className="w-14 h-14 rounded-2xl bg-sandal-100 text-red-600 flex items-center justify-center text-lg font-black border border-sandal-300">
                         {(latestMatch.studentName || latestMatch.studentId).slice(0, 2).toUpperCase()}
                       </div>
-                      <span className="text-xs text-slate-500">No Photo Captured</span>
+                      <span className="text-xs text-red-900/50">No Photo</span>
                     </div>
                   )}
 
-                  <div className="absolute top-2 right-2 px-2.5 py-1 rounded-md bg-black/80 backdrop-blur-md text-emerald-400 text-xs font-bold border border-emerald-500/30">
-                    {Math.round((latestMatch.confidence || 0) * 100)}% Conf
+                  <div className="absolute top-2 right-2 px-2 py-0.5 rounded-md bg-white/95 text-red-700 text-xs font-bold border border-red-200 shadow-sm">
+                    {Math.round((latestMatch.confidence || 0) * 100)}% Match
                   </div>
                 </div>
 
                 <div>
-                  <h4 className="text-lg font-bold text-white">
+                  <h4 className="text-base font-bold text-red-950">
                     {latestMatch.studentName || `Student ${latestMatch.studentId}`}
                   </h4>
                   <div className="flex items-center gap-2 mt-1">
-                    <span className="font-mono text-xs px-2 py-0.5 rounded bg-dark-900 text-brand-400 border border-white/5">
+                    <span className="font-mono text-xs px-2 py-0.5 rounded bg-sandal-100 text-red-700 font-bold border border-sandal-200">
                       {latestMatch.studentId}
                     </span>
-                    <span className="text-xs text-slate-400">{latestMatch.department || 'Computer Science'}</span>
+                    <span className="text-xs text-red-900/60 font-medium">
+                      {latestMatch.department || 'Computer Science'}
+                    </span>
                   </div>
                 </div>
               </div>
             ) : (
-              <div className="py-12 text-center text-slate-500 text-xs flex flex-col items-center gap-2">
-                <Users className="w-8 h-8 text-slate-600" />
-                <span>Waiting for student recognition at entrance...</span>
+              <div className="py-12 text-center text-red-900/50 text-xs flex flex-col items-center gap-2">
+                <Users className="w-8 h-8 text-sandal-300" />
+                <span>Waiting for student at entrance...</span>
               </div>
             )}
           </div>
 
           {latestMatch && (
-            <div className="pt-4 border-t border-white/5 flex items-center justify-between text-xs text-slate-400">
-              <span>Arrival: {formatTime(latestMatch.timestamp)}</span>
-              <span className="text-emerald-400 font-semibold flex items-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                Verified Present
+            <div className="pt-3 border-t border-sandal-100 flex items-center justify-between text-xs text-red-900/70 font-medium">
+              <span>Time: {formatTime(latestMatch.timestamp)}</span>
+              <span className="text-emerald-700 font-semibold flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                Present
               </span>
             </div>
           )}
@@ -564,72 +527,66 @@ export const Dashboard = () => {
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="glass-panel rounded-2xl p-4 mb-6 flex flex-col md:flex-row items-center justify-between gap-4">
-        <div className="relative w-full md:w-80">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+      <div className="bg-white rounded-2xl p-3 mb-5 flex flex-col md:flex-row items-center justify-between gap-3 border border-sandal-200 shadow-sandal-sm">
+        <div className="relative w-full md:w-72">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-red-900/40" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search by student name or ID..."
-            className="w-full pl-10 pr-4 py-2 rounded-xl bg-dark-900 border border-white/10 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-brand-500 transition-colors"
+            placeholder="Search students..."
+            className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-sandal-50 border border-sandal-200 text-xs text-red-950 placeholder-red-900/40 focus:outline-none focus:border-red-500 transition-colors"
           />
         </div>
 
-        <div className="flex items-center gap-2 w-full md:w-auto overflow-x-auto pb-1 md:pb-0">
-          {['ALL', 'MULTIMODAL', 'FACE', 'BODY'].map((type) => (
+        <div className="flex items-center gap-1.5 w-full md:w-auto">
+          {['ALL', 'MULTIMODAL', 'FACE'].map((type) => (
             <button
               key={type}
               onClick={() => setTypeFilter(type)}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all border ${
                 typeFilter === type
-                  ? 'bg-brand-600 text-white shadow-md shadow-brand-600/30'
-                  : 'bg-dark-900 text-slate-400 border border-white/5 hover:text-slate-200 hover:bg-white/5'
+                  ? 'bg-red-600 text-white border-red-600 shadow-sm'
+                  : 'bg-sandal-50 text-red-900/70 border-sandal-200 hover:bg-sandal-100'
               }`}
             >
-              {type}
+              {type === 'ALL' ? 'All' : type === 'MULTIMODAL' ? 'Face + Body' : 'Face Only'}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Real-Time Attendance Table with Live Captured Photos */}
-      <div className="glass-panel rounded-2xl border border-white/10 overflow-hidden shadow-2xl">
-        <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between">
+      {/* Attendees Table */}
+      <div className="bg-white rounded-2xl border border-sandal-200 overflow-hidden shadow-sandal-sm">
+        <div className="px-5 py-3.5 border-b border-sandal-200 flex items-center justify-between bg-sandal-50/50">
           <div className="flex items-center gap-2">
-            <Users className="w-4 h-4 text-brand-400" />
-            <h3 className="text-sm font-bold text-white tracking-wide uppercase">
-              Live Attendees Roster ({filteredStudents.length})
+            <Users className="w-4 h-4 text-red-600" />
+            <h3 className="text-sm font-bold text-red-950">
+              Today's Attendance ({filteredStudents.length})
             </h3>
-          </div>
-          <div className="text-xs text-slate-400 flex items-center gap-2">
-            <Clock className="w-3.5 h-3.5 text-slate-500" />
-            Auto-refreshing via WebSocket
           </div>
         </div>
 
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-dark-900/60 border-b border-white/5 text-xs font-semibold uppercase tracking-wider text-slate-400">
-                <th className="py-3.5 px-6">Captured Photo & Student</th>
-                <th className="py-3.5 px-6">Student ID</th>
-                <th className="py-3.5 px-6">Arrival Time</th>
-                <th className="py-3.5 px-6">Detection Mode</th>
-                <th className="py-3.5 px-6">Match Confidence</th>
-                <th className="py-3.5 px-6 text-right">Status</th>
+              <tr className="bg-sandal-50 border-b border-sandal-200 text-xs font-semibold uppercase tracking-wider text-red-900/70">
+                <th className="py-3 px-5">Student</th>
+                <th className="py-3 px-5">Roll No</th>
+                <th className="py-3 px-5">Time</th>
+                <th className="py-3 px-5">Mode</th>
+                <th className="py-3 px-5">Score</th>
+                <th className="py-3 px-5 text-right">Status</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/5 text-sm">
+            <tbody className="divide-y divide-sandal-100 text-xs">
               {filteredStudents.length === 0 ? (
                 <tr>
-                  <td colSpan="6" className="py-12 text-center text-slate-500">
-                    <div className="flex flex-col items-center justify-center gap-2">
-                      <Users className="w-8 h-8 text-slate-600" />
-                      <p className="text-sm font-medium">No attendance logs yet.</p>
-                      <p className="text-xs text-slate-600">
-                        Start the ML Camera Worker and look into the camera to be recognized!
-                      </p>
+                  <td colSpan="6" className="py-10 text-center text-red-900/50">
+                    <div className="flex flex-col items-center justify-center gap-1.5">
+                      <Users className="w-6 h-6 text-sandal-300" />
+                      <p className="text-xs font-semibold">No attendance marked yet.</p>
+                      <p className="text-[11px] text-red-900/40">Start camera to log students.</p>
                     </div>
                   </td>
                 </tr>
@@ -641,88 +598,57 @@ export const Dashboard = () => {
                   return (
                     <tr
                       key={item._id || item.studentId}
-                      className={`transition-colors duration-500 hover:bg-white/[0.02] ${
-                        isNew ? 'bg-emerald-500/20 ring-1 ring-emerald-500/50' : ''
+                      className={`transition-colors duration-300 hover:bg-sandal-50/60 ${
+                        isNew ? 'bg-red-50' : ''
                       }`}
                     >
                       {/* Photo Thumbnail + Student Info */}
-                      <td className="py-4 px-6">
-                        <div className="flex items-center gap-3.5">
+                      <td className="py-3 px-5">
+                        <div className="flex items-center gap-3">
                           {item.photo ? (
                             <img
                               src={item.photo}
                               alt={item.studentName}
-                              className="w-11 h-11 rounded-xl object-cover border border-emerald-500/40 shadow-md ring-1 ring-white/10"
+                              className="w-9 h-9 rounded-xl object-cover border border-sandal-300 shadow-sm"
                             />
                           ) : (
-                            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-brand-600 to-accent-violet flex items-center justify-center text-white font-bold text-xs shadow-md">
+                            <div className="w-9 h-9 rounded-xl bg-sandal-100 text-red-700 flex items-center justify-center font-bold text-xs border border-sandal-200">
                               {(item.studentName || item.studentId).slice(0, 2).toUpperCase()}
                             </div>
                           )}
-                          <div>
-                            <div className="font-semibold text-slate-100">
-                              {item.studentName || `Student ${item.studentId}`}
-                            </div>
-                            <div className="text-xs text-slate-400">
-                              {item.doorLocation || 'Classroom Entrance'}
-                            </div>
+                          <div className="font-bold text-red-950">
+                            {item.studentName || `Student ${item.studentId}`}
                           </div>
                         </div>
                       </td>
 
                       {/* Student ID */}
-                      <td className="py-4 px-6">
-                        <span className="font-mono text-xs font-medium px-2.5 py-1 rounded-md bg-dark-900 border border-white/10 text-brand-400">
+                      <td className="py-3 px-5">
+                        <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-sandal-100 border border-sandal-200 text-red-700">
                           {item.studentId}
                         </span>
                       </td>
 
                       {/* Timestamp */}
-                      <td className="py-4 px-6">
-                        <div className="text-slate-200 font-medium text-xs">
-                          {formatTime(item.timestamp)}
-                        </div>
-                        <div className="text-[11px] text-slate-500">
-                          {getRelativeMinutes(item.timestamp)}
-                        </div>
+                      <td className="py-3 px-5">
+                        <div className="text-red-950 font-semibold">{formatTime(item.timestamp)}</div>
+                        <div className="text-[10px] text-red-900/50">{getRelativeMinutes(item.timestamp)}</div>
                       </td>
 
                       {/* Match Type Badge */}
-                      <td className="py-4 px-6">
-                        {item.matchType === 'Multimodal' ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                            <Sparkles className="w-3 h-3" />
-                            Multimodal (Face+Body)
-                          </span>
-                        ) : item.matchType === 'Face' ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-violet-500/10 text-violet-400 border border-violet-500/20">
-                            <ScanFace className="w-3 h-3" />
-                            FaceNet Crop
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                            <UserCheck className="w-3 h-3" />
-                            Body Track
-                          </span>
-                        )}
+                      <td className="py-3 px-5">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-red-50 text-red-700 border border-red-200">
+                          {item.matchType === 'Multimodal' ? 'Face + Body' : 'Face'}
+                        </span>
                       </td>
 
                       {/* Confidence Score */}
-                      <td className="py-4 px-6">
-                        <div className="w-32 space-y-1">
-                          <div className="flex justify-between text-xs">
-                            <span className="font-medium text-slate-300">{confidencePct}%</span>
-                            <span className="text-[10px] text-slate-500">Cosine</span>
-                          </div>
-                          <div className="w-full bg-dark-900 rounded-full h-1.5 overflow-hidden">
+                      <td className="py-3 px-5">
+                        <div className="w-24 space-y-1">
+                          <div className="text-[11px] font-bold text-red-950">{confidencePct}%</div>
+                          <div className="w-full bg-sandal-100 rounded-full h-1.5 overflow-hidden">
                             <div
-                              className={`h-1.5 rounded-full transition-all duration-300 ${
-                                confidencePct >= 75
-                                  ? 'bg-emerald-400'
-                                  : confidencePct >= 50
-                                  ? 'bg-brand-400'
-                                  : 'bg-amber-400'
-                              }`}
+                              className="bg-gradient-to-r from-sandal-400 to-red-600 h-1.5 rounded-full"
                               style={{ width: `${confidencePct}%` }}
                             />
                           </div>
@@ -730,10 +656,10 @@ export const Dashboard = () => {
                       </td>
 
                       {/* Status */}
-                      <td className="py-4 px-6 text-right">
-                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-400">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                          Marked Present
+                      <td className="py-3 px-5 text-right">
+                        <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                          Present
                         </span>
                       </td>
                     </tr>
@@ -747,36 +673,31 @@ export const Dashboard = () => {
 
       {/* Confirmation Modal to Clear Data */}
       {showResetModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="glass-panel rounded-2xl border border-white/20 p-6 max-w-md w-full shadow-2xl space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-red-950/40 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl border border-sandal-200 p-6 max-w-sm w-full shadow-xl space-y-4">
             <div className="flex items-center gap-3">
-              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400">
-                <AlertTriangle className="w-6 h-6" />
+              <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-600">
+                <AlertTriangle className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-base font-bold text-white">Clear All Demo Data?</h3>
-                <p className="text-xs text-slate-400">This action cannot be undone.</p>
+                <h3 className="text-sm font-bold text-red-950">Reset Demo Data?</h3>
+                <p className="text-xs text-red-900/60">This will clear today's attendance.</p>
               </div>
             </div>
 
-            <p className="text-xs text-slate-300">
-              This will permanently delete all 65 demo students and existing attendance logs so you can enroll your students freshly with real FaceNet models.
-            </p>
-
-            <div className="flex items-center justify-end gap-2.5 pt-2">
+            <div className="flex items-center justify-end gap-2 pt-2">
               <button
                 onClick={() => setShowResetModal(false)}
-                className="px-4 py-2 rounded-xl bg-dark-900 hover:bg-dark-850 text-slate-300 text-xs border border-white/10"
+                className="px-3 py-1.5 rounded-xl bg-sandal-50 hover:bg-sandal-100 text-red-900 text-xs font-semibold border border-sandal-200"
               >
                 Cancel
               </button>
               <button
                 onClick={handleClearAllData}
                 disabled={resetting}
-                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-lg shadow-rose-600/30 flex items-center gap-1.5 disabled:opacity-50"
+                className="px-3.5 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-sm transition-all disabled:opacity-50"
               >
-                {resetting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                Yes, Clear All Data
+                {resetting ? 'Clearing...' : 'Clear Data'}
               </button>
             </div>
           </div>
