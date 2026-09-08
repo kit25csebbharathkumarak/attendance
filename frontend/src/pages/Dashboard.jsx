@@ -179,12 +179,14 @@ export const Dashboard = () => {
     socket.on('live_frame', handleLiveFrame);
     socket.on('worker_status', handleWorkerStatus);
     socket.on('data_reset', handleDataReset);
+    socket.on('student_deleted', fetchEnrolledCount);
 
     return () => {
       socket.off('new_attendance', handleNewAttendance);
       socket.off('live_frame', handleLiveFrame);
       socket.off('worker_status', handleWorkerStatus);
       socket.off('data_reset', handleDataReset);
+      socket.off('student_deleted', fetchEnrolledCount);
     };
   }, [socket]);
 

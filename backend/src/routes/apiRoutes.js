@@ -5,6 +5,8 @@ const {
   enrollStudent,
   getStudents,
   getStudentEmbeddings,
+  deleteStudent,
+  clearAllStudents,
 } = require('../controllers/enrollmentController');
 
 const {
@@ -26,6 +28,8 @@ const {
 router.post('/enroll', enrollStudent);
 router.get('/students', getStudents);
 router.get('/students/embeddings', getStudentEmbeddings);
+router.delete('/students/:studentId', deleteStudent);
+router.delete('/students', clearAllStudents);
 
 // Attendance Routes
 router.get('/attendance/today', getTodayAttendance);

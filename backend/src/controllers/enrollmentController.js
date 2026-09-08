@@ -251,8 +251,86 @@ const getStudentEmbeddings = async (req, res) => {
   }
 };
 
+/**
+ * @route   DELETE /api/students/:studentId
+ * @desc    Delete a single enrolled student
+ */
+const deleteStudent = async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    if (!studentId) {
+      return res.status(400).json({ success: false, message: 'Student ID is required.' });
+    }
+
+    const cleanId = String(studentId).trim();
+
+    if (isMongoConnected()) {
+      await Student.findOneAndDelete({ studentId: cleanId });
+    }
+
+    const index = memoryStudents.findIndex((s) => s.studentId === cleanId);
+    let removedName = cleanId;
+    if (index >= 0) {
+      removedName = memoryStudents[index].name;
+      memoryStudents.splice(index, 1);
+      saveStudentsToFile();
+    }
+
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('student_deleted', { studentId: cleanId });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Student ${removedName} (${cleanId}) deleted successfully.`,
+    });
+  } catch (error) {
+    console.error('[Delete Student Error]', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to delete student.',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * @route   DELETE /api/students
+ * @desc    Clear all enrolled students
+ */
+const clearAllStudents = async (req, res) => {
+  try {
+    if (isMongoConnected()) {
+      await Student.deleteMany({});
+    }
+
+    memoryStudents.length = 0;
+    saveStudentsToFile();
+
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('student_deleted', { all: true });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'All enrolled students removed successfully.',
+    });
+  } catch (error) {
+    console.error('[Clear Students Error]', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to clear students.',
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   enrollStudent,
   getStudents,
   getStudentEmbeddings,
+  deleteStudent,
+  clearAllStudents,
 };
