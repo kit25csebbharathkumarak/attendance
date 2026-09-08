@@ -115,6 +115,7 @@ def main():
 
     last_processed_time = 0.0
     last_frame_broadcast = 0.0
+    last_sync_time = 0.0
     recent_detections = []
     frame_count = 0
 
@@ -122,6 +123,11 @@ def main():
         while True:
             current_time = time.time()
             time_since_last = current_time - last_processed_time
+
+            # Synchronize newly enrolled students every 5 seconds
+            if current_time - last_sync_time >= 5.0:
+                matcher.load_enrolled_students(backend_url=BACKEND_EMBEDDINGS_URL)
+                last_sync_time = current_time
 
             # 1. Grab Frame
             if not is_mock_feed:
@@ -143,9 +149,6 @@ def main():
             if time_since_last >= FRAME_THROTTLE_SECONDS:
                 last_processed_time = current_time
                 recent_detections = []
-
-                if frame_count % 15 == 0:
-                    matcher.load_enrolled_students(backend_url=BACKEND_EMBEDDINGS_URL)
 
                 # A. Detect people
                 persons = detector.detect_people(frame)
@@ -212,10 +215,11 @@ def main():
                 cv2.putText(display_frame, tag, (bx1 + 5, max(16, by1 - 6)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 2)
 
-            # 4. Broadcast live frame to React dashboard every 1 second
-            if current_time - last_frame_broadcast >= 1.0:
+            # 4. Broadcast live frame to React dashboard (~5 FPS for smooth angle adjustment)
+            if current_time - last_frame_broadcast >= 0.20:
                 broadcast_frame_to_dashboard(display_frame)
                 last_frame_broadcast = current_time
+
 
             # 5. Local OpenCV Window Display
             if SHOW_DISPLAY:

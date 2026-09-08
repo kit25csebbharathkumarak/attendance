@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Users,
   Search,
@@ -8,12 +8,14 @@ import {
   UserCheck,
   CheckCircle2,
   Clock,
-  Download,
   Play,
+  Square,
+  Trash2,
   Camera,
-  Video,
   Eye,
-  ShieldCheck
+  ShieldCheck,
+  Activity,
+  AlertTriangle
 } from 'lucide-react';
 import { useSocket } from '../context/SocketContext';
 import { StatsCards } from '../components/StatsCards';
@@ -21,38 +23,41 @@ import { StatsCards } from '../components/StatsCards';
 export const Dashboard = () => {
   const { socket, isConnected } = useSocket();
 
-  // Primary State: presentStudents
+  // Primary State
   const [presentStudents, setPresentStudents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('ALL');
   const [highlightedId, setHighlightedId] = useState(null);
-  const [simulating, setSimulating] = useState(false);
 
-  // Live ML Worker Frame Streaming via WebSocket
+  // Worker Control State
+  const [workerRunning, setWorkerRunning] = useState(false);
+  const [workerPid, setWorkerPid] = useState(null);
+  const [workerLoading, setWorkerLoading] = useState(false);
+
+  // Live Stream State
   const [liveFrame, setLiveFrame] = useState(null);
   const [lastFrameTime, setLastFrameTime] = useState(0);
 
-  useEffect(() => {
-    if (!socket) return;
+  // Reset Modal State
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
-    const handleLiveFrame = (data) => {
-      if (data?.frame) {
-        setLiveFrame(data.frame);
-        setLastFrameTime(Date.now());
+  // 1. Check Worker Status on Mount
+  const fetchWorkerStatus = async () => {
+    try {
+      const res = await fetch('/api/worker/status');
+      if (res.ok) {
+        const json = await res.json();
+        setWorkerRunning(json.running);
+        setWorkerPid(json.pid);
       }
-    };
+    } catch (e) {
+      console.warn('Worker status check failed:', e);
+    }
+  };
 
-    socket.on('live_frame', handleLiveFrame);
-
-    return () => {
-      socket.off('live_frame', handleLiveFrame);
-    };
-  }, [socket]);
-
-  const isWorkerStreaming = Date.now() - lastFrameTime < 4000 && !!liveFrame;
-
-  // 1. Fetch Today's Initial Attendance on Mount
+  // 2. Fetch Today's Attendance Logs on Mount
   const fetchTodayAttendance = async () => {
     try {
       setLoading(true);
@@ -69,16 +74,17 @@ export const Dashboard = () => {
   };
 
   useEffect(() => {
+    fetchWorkerStatus();
     fetchTodayAttendance();
   }, []);
 
-  // 2. Connect & Listen to 'new_attendance' Socket.IO event
+  // 3. Socket.IO Event Listeners
   useEffect(() => {
     if (!socket) return;
 
+    // Listen to new attendance
     const handleNewAttendance = (newRecord) => {
       console.log('[Socket Event Received] new_attendance:', newRecord);
-
       setPresentStudents((prev) => {
         const filtered = prev.filter((item) => item.studentId !== newRecord.studentId);
         return [newRecord, ...filtered];
@@ -90,41 +96,84 @@ export const Dashboard = () => {
       }, 3000);
     };
 
+    // Listen to live camera frames from Python ML worker
+    const handleLiveFrame = (data) => {
+      if (data?.frame) {
+        setLiveFrame(data.frame);
+        setLastFrameTime(Date.now());
+      }
+    };
+
+    // Listen to worker status updates
+    const handleWorkerStatus = (data) => {
+      setWorkerRunning(data.running);
+      setWorkerPid(data.pid);
+      if (!data.running) {
+        setLiveFrame(null);
+      }
+    };
+
+    // Listen to system data reset
+    const handleDataReset = () => {
+      setPresentStudents([]);
+      fetchTodayAttendance();
+    };
+
     socket.on('new_attendance', handleNewAttendance);
+    socket.on('live_frame', handleLiveFrame);
+    socket.on('worker_status', handleWorkerStatus);
+    socket.on('data_reset', handleDataReset);
 
     return () => {
       socket.off('new_attendance', handleNewAttendance);
+      socket.off('live_frame', handleLiveFrame);
+      socket.off('worker_status', handleWorkerStatus);
+      socket.off('data_reset', handleDataReset);
     };
   }, [socket]);
 
-
-
-  // 3. Simulated Match Event Trigger (Test)
-  const triggerSimulatedMatch = async () => {
+  // Worker Start / Stop Handlers
+  const toggleWorker = async () => {
     try {
-      setSimulating(true);
-      const randomStudentNum = Math.floor(Math.random() * 65) + 1;
-      const studentId = `STU${String(randomStudentNum).padStart(3, '0')}`;
-      const matchTypes = ['Multimodal', 'Face', 'Multimodal'];
-      const chosenType = matchTypes[Math.floor(Math.random() * matchTypes.length)];
-      const confidence = Number((0.85 + Math.random() * 0.14).toFixed(3));
-
-      await fetch('/api/webhook/match', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          studentId,
-          matchType: chosenType,
-          confidence,
-          doorLocation: 'Classroom Main Entrance',
-        }),
-      });
-    } catch (error) {
-      console.error('Simulation error:', error);
+      setWorkerLoading(true);
+      const endpoint = workerRunning ? '/api/worker/stop' : '/api/worker/start';
+      const res = await fetch(endpoint, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        if (!workerRunning) {
+          setWorkerRunning(true);
+          setWorkerPid(data.pid);
+        } else {
+          setWorkerRunning(false);
+          setWorkerPid(null);
+          setLiveFrame(null);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to toggle worker:', err);
     } finally {
-      setSimulating(false);
+      setWorkerLoading(false);
     }
   };
+
+  // Clear All Demo Data
+  const handleClearAllData = async () => {
+    try {
+      setResetting(true);
+      const res = await fetch('/api/system/reset', { method: 'POST' });
+      if (res.ok) {
+        setPresentStudents([]);
+        setShowResetModal(false);
+      }
+    } catch (e) {
+      console.error('Failed to reset data:', e);
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  // Check if live stream from Python worker is active
+  const isStreamActive = Date.now() - lastFrameTime < 3500 && !!liveFrame;
 
   // 4. Compute Metrics for KPI Cards
   const stats = useMemo(() => {
@@ -164,7 +213,6 @@ export const Dashboard = () => {
     });
   }, [presentStudents, searchQuery, typeFilter]);
 
-  // Format Time Helper
   const formatTime = (isoString) => {
     if (!isoString) return '--:--:--';
     const date = new Date(isoString);
@@ -180,7 +228,6 @@ export const Dashboard = () => {
     return `${diffMins} mins ago`;
   };
 
-  // Most recent detected student
   const latestMatch = presentStudents[0] || null;
 
   return (
@@ -190,34 +237,65 @@ export const Dashboard = () => {
         <div>
           <h2 className="text-2xl font-extrabold text-white tracking-tight flex items-center gap-2.5">
             Walk-Through Attendance Monitor
-            <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 live-pulse" />
-              Live Doorway
+            <span
+              className={`text-xs px-2.5 py-0.5 rounded-full font-semibold flex items-center gap-1.5 border ${
+                workerRunning
+                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                  : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+              }`}
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  workerRunning ? 'bg-emerald-400 live-pulse' : 'bg-amber-400'
+                }`}
+              />
+              {workerRunning ? `AI Worker Active (PID: ${workerPid || 'Running'})` : 'AI Worker Idle'}
             </span>
           </h2>
           <p className="text-sm text-slate-400 mt-1">
-            Real-time YOLOv8 + FaceNet 512-d biometric entrance monitoring with live photo verification.
+            Real-time YOLOv8 + FaceNet 512-d biometric entrance monitoring with live video stream.
           </p>
         </div>
 
-        {/* Action Controls */}
+        {/* Master Control Buttons */}
         <div className="flex flex-wrap items-center gap-2.5">
-
+          {/* Start/Stop ML Worker Button */}
           <button
-            onClick={triggerSimulatedMatch}
-            disabled={simulating}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-brand-600 to-accent-cyan text-white text-xs font-semibold hover:opacity-90 transition-all shadow-lg shadow-brand-500/20 active:scale-95 disabled:opacity-50"
+            onClick={toggleWorker}
+            disabled={workerLoading}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all shadow-lg active:scale-95 disabled:opacity-50 ${
+              workerRunning
+                ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-rose-600/30'
+                : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30'
+            }`}
           >
-            <Play className="w-3.5 h-3.5 fill-current" />
-            {simulating ? 'Sending...' : 'Simulate Match'}
+            {workerLoading ? (
+              <RefreshCw className="w-4 h-4 animate-spin" />
+            ) : workerRunning ? (
+              <Square className="w-4 h-4 fill-current" />
+            ) : (
+              <Play className="w-4 h-4 fill-current" />
+            )}
+            {workerRunning ? 'Stop ML Camera Worker' : 'Start ML Camera Worker'}
           </button>
 
+          {/* Refresh Table */}
           <button
             onClick={fetchTodayAttendance}
             className="p-2.5 rounded-xl bg-dark-900 border border-white/10 text-slate-300 hover:text-white hover:bg-white/5 transition-all"
-            title="Refresh Logs"
+            title="Refresh Attendance Logs"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-brand-400' : ''}`} />
+          </button>
+
+          {/* Reset All Data Button */}
+          <button
+            onClick={() => setShowResetModal(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-dark-900 border border-rose-500/30 text-rose-300 hover:bg-rose-500/10 text-xs font-semibold transition-all"
+            title="Clear all demo students and attendance logs to enroll freshly"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+            Clear Demo Data
           </button>
         </div>
       </div>
@@ -236,45 +314,60 @@ export const Dashboard = () => {
                 Entrance Camera Live Stream (Classroom 301)
               </h3>
             </div>
-            <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium flex items-center gap-1 border ${
-              isWorkerStreaming
-                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                : 'bg-brand-500/10 text-brand-400 border-brand-500/20'
-            }`}>
+            <span
+              className={`text-xs px-2.5 py-0.5 rounded-full font-medium flex items-center gap-1 border ${
+                isStreamActive
+                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                  : 'bg-brand-500/10 text-brand-400 border-brand-500/20'
+              }`}
+            >
               <Eye className="w-3 h-3" />
-              {isWorkerStreaming ? 'Worker Streaming Live' : 'Worker Standby'}
+              {isStreamActive ? 'Live Camera Feed' : workerRunning ? 'Connecting Stream...' : 'Worker Standby'}
             </span>
           </div>
 
           <div className="relative rounded-xl overflow-hidden bg-black aspect-video flex items-center justify-center border border-white/10 shadow-inner">
-            {isWorkerStreaming ? (
+            {isStreamActive ? (
               <>
                 <img
                   src={liveFrame}
-                  alt="Live Camera Stream"
+                  alt="Live Camera Feed"
                   className="w-full h-full object-cover"
                 />
                 {/* On-screen HUD Bar */}
                 <div className="absolute top-3 left-3 px-3 py-1 rounded-lg bg-black/80 backdrop-blur-md border border-emerald-500/30 text-xs text-emerald-400 font-semibold flex items-center gap-1.5 shadow-lg">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 live-pulse" />
-                  YOLOv8 + FaceNet Camera Worker (Active Stream)
+                  YOLOv8 + FaceNet Camera Active (Adjust angle so face is centered)
                 </div>
               </>
             ) : (
               <div className="flex flex-col items-center justify-center gap-3 p-6 text-center text-slate-400">
                 <div className="w-14 h-14 rounded-2xl bg-dark-900 border border-white/10 flex items-center justify-center shadow-lg">
-                  <Video className="w-7 h-7 text-slate-500" />
+                  <Camera className="w-7 h-7 text-slate-500" />
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-slate-300">Live Entrance Feed Standby</p>
+                  <p className="text-sm font-semibold text-slate-200">
+                    {workerRunning ? 'Initializing Camera Feed...' : 'Live Camera Stream Offline'}
+                  </p>
                   <p className="text-xs text-slate-500 mt-1 max-w-sm">
-                    Run <code className="text-emerald-400 font-mono bg-dark-900 px-1.5 py-0.5 rounded border border-white/5">python ml_worker.py</code> in your terminal. The camera feed with AI bounding boxes will appear here in real time!
+                    {workerRunning
+                      ? 'Camera is warming up. Live frames with AI bounding boxes will appear here in a few seconds.'
+                      : 'Click the green "Start ML Camera Worker" button above to launch the camera and adjust your angle.'}
                   </p>
                 </div>
+                {!workerRunning && (
+                  <button
+                    onClick={toggleWorker}
+                    disabled={workerLoading}
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-md transition-all flex items-center gap-1.5"
+                  >
+                    <Play className="w-3.5 h-3.5 fill-current" />
+                    Start Camera Feed
+                  </button>
+                )}
               </div>
             )}
           </div>
-
         </div>
 
         {/* Latest Verified Match Spotlight */}
@@ -325,7 +418,7 @@ export const Dashboard = () => {
             ) : (
               <div className="py-12 text-center text-slate-500 text-xs flex flex-col items-center gap-2">
                 <Users className="w-8 h-8 text-slate-600" />
-                <span>Waiting for student detection at entrance...</span>
+                <span>Waiting for student recognition at entrance...</span>
               </div>
             )}
           </div>
@@ -405,9 +498,9 @@ export const Dashboard = () => {
                   <td colSpan="6" className="py-12 text-center text-slate-500">
                     <div className="flex flex-col items-center justify-center gap-2">
                       <Users className="w-8 h-8 text-slate-600" />
-                      <p className="text-sm font-medium">No attendance logs matching filter today.</p>
+                      <p className="text-sm font-medium">No attendance logs yet.</p>
                       <p className="text-xs text-slate-600">
-                        Camera is monitoring entrance. Run python ml_worker.py or click "Simulate Match".
+                        Start the ML Camera Worker and look into the camera to be recognized!
                       </p>
                     </div>
                   </td>
@@ -496,9 +589,9 @@ export const Dashboard = () => {
                           <div className="w-full bg-dark-900 rounded-full h-1.5 overflow-hidden">
                             <div
                               className={`h-1.5 rounded-full transition-all duration-300 ${
-                                confidencePct >= 80
+                                confidencePct >= 75
                                   ? 'bg-emerald-400'
-                                  : confidencePct >= 60
+                                  : confidencePct >= 50
                                   ? 'bg-brand-400'
                                   : 'bg-amber-400'
                               }`}
@@ -523,6 +616,44 @@ export const Dashboard = () => {
           </table>
         </div>
       </div>
+
+      {/* Confirmation Modal to Clear Data */}
+      {showResetModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="glass-panel rounded-2xl border border-white/20 p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">Clear All Demo Data?</h3>
+                <p className="text-xs text-slate-400">This action cannot be undone.</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300">
+              This will permanently delete all 65 demo students and existing attendance logs so you can enroll your students freshly with real FaceNet models.
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                onClick={() => setShowResetModal(false)}
+                className="px-4 py-2 rounded-xl bg-dark-900 hover:bg-dark-850 text-slate-300 text-xs border border-white/10"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleClearAllData}
+                disabled={resetting}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-lg shadow-rose-600/30 flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {resetting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                Yes, Clear All Data
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

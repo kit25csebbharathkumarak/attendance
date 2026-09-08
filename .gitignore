@@ -17,6 +17,7 @@ venv/
 
 # ML Models & Weights
 ml-engine/models/*.pt
+ml-engine/*.pt
 ml-engine/models/*.onnx
 ml-engine/models/*.weights
 ml-engine/data/test_runs/

@@ -16,6 +16,8 @@ export const Enrollment = () => {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
 
+  const [workerRunning, setWorkerRunning] = useState(false);
+
   const fetchEnrolled = async () => {
     try {
       const res = await fetch('/api/students');
@@ -28,8 +30,19 @@ export const Enrollment = () => {
     }
   };
 
+  const checkWorker = async () => {
+    try {
+      const res = await fetch('/api/worker/status');
+      if (res.ok) {
+        const json = await res.json();
+        setWorkerRunning(Boolean(json.running));
+      }
+    } catch (e) {}
+  };
+
   useEffect(() => {
     fetchEnrolled();
+    checkWorker();
     return () => {
       stopCamera();
     };
@@ -38,6 +51,16 @@ export const Enrollment = () => {
   // Start Browser Webcam Feed
   const startCamera = async () => {
     try {
+      setMessage(null);
+      // On Windows, webcam is exclusive to one app. If ML worker is running, stop it first.
+      if (workerRunning) {
+        try {
+          await fetch('/api/worker/stop', { method: 'POST' });
+          setWorkerRunning(false);
+          await new Promise((r) => setTimeout(r, 600));
+        } catch (e) {}
+      }
+
       setUseCamera(true);
       setCapturedImage(null);
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -49,7 +72,10 @@ export const Enrollment = () => {
       }
     } catch (err) {
       console.error('Webcam access error:', err);
-      setMessage({ type: 'error', text: 'Could not access webcam. Please check browser permissions.' });
+      setMessage({
+        type: 'error',
+        text: 'Could not access webcam. If camera is occupied, please upload a photo or retry.',
+      });
       setUseCamera(false);
     }
   };

@@ -14,6 +14,13 @@ const {
   broadcastCameraFrame,
 } = require('../controllers/attendanceController');
 
+const {
+  startWorker,
+  stopWorker,
+  getWorkerStatus,
+  resetSystemData,
+} = require('../controllers/workerController');
+
 // Enrollment Routes
 router.post('/enroll', enrollStudent);
 router.get('/students', getStudents);
@@ -27,5 +34,10 @@ router.get('/attendance/stats', getTodayStats);
 router.post('/webhook/match', recordMatchWebhook);
 router.post('/webhook/frame', broadcastCameraFrame);
 
-module.exports = router;
+// ML Worker Process Control & System Reset
+router.post('/worker/start', startWorker);
+router.post('/worker/stop', stopWorker);
+router.get('/worker/status', getWorkerStatus);
+router.post('/system/reset', resetSystemData);
 
+module.exports = router;
