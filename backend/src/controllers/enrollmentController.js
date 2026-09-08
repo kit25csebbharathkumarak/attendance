@@ -1,4 +1,5 @@
 const Student = require('../models/Student');
+const { isMongoConnected, memoryStudents } = require('../config/dataStore');
 
 /**
  * @route   POST /api/enroll
@@ -15,39 +16,58 @@ const enrollStudent = async (req, res) => {
       });
     }
 
-    if (!faceEmbeddings || (Array.isArray(faceEmbeddings) && faceEmbeddings.length === 0)) {
-      return res.status(400).json({
-        success: false,
-        message: 'faceEmbeddings array is required for facial recognition matching.',
+    const cleanId = studentId.trim();
+    const cleanName = name.trim();
+    const cleanDept = department || 'Computer Science';
+    const cleanEmail = email || '';
+
+    if (isMongoConnected()) {
+      const student = await Student.findOneAndUpdate(
+        { studentId: cleanId },
+        {
+          studentId: cleanId,
+          name: cleanName,
+          faceEmbeddings: faceEmbeddings || [],
+          department: cleanDept,
+          email: cleanEmail,
+          avatarUrl: avatarUrl || '',
+        },
+        { new: true, upsert: true, runValidators: true }
+      );
+
+      return res.status(200).json({
+        success: true,
+        message: `Student ${student.name} (${student.studentId}) successfully enrolled.`,
+        data: {
+          studentId: student.studentId,
+          name: student.name,
+          department: student.department,
+          createdAt: student.createdAt,
+        },
       });
     }
 
-    // Upsert student record
-    const student = await Student.findOneAndUpdate(
-      { studentId: studentId.trim() },
-      {
-        studentId: studentId.trim(),
-        name: name.trim(),
-        faceEmbeddings,
-        department: department || 'Computer Science',
-        email: email || '',
-        avatarUrl: avatarUrl || '',
-      },
-      { new: true, upsert: true, runValidators: true }
-    );
+    // In-memory fallback store
+    const existingIndex = memoryStudents.findIndex((s) => s.studentId === cleanId);
+    const newStudent = {
+      studentId: cleanId,
+      name: cleanName,
+      department: cleanDept,
+      email: cleanEmail,
+      faceEmbeddings: faceEmbeddings || [],
+      createdAt: new Date(),
+    };
+
+    if (existingIndex >= 0) {
+      memoryStudents[existingIndex] = newStudent;
+    } else {
+      memoryStudents.push(newStudent);
+    }
 
     return res.status(200).json({
       success: true,
-      message: `Student ${student.name} (${student.studentId}) successfully enrolled.`,
-      data: {
-        studentId: student.studentId,
-        name: student.name,
-        department: student.department,
-        embeddingsCount: Array.isArray(student.faceEmbeddings[0])
-          ? student.faceEmbeddings.length
-          : 1,
-        createdAt: student.createdAt,
-      },
+      message: `Student ${cleanName} (${cleanId}) successfully enrolled.`,
+      data: newStudent,
     });
   } catch (error) {
     console.error('[Enrollment Error]', error);
@@ -65,14 +85,29 @@ const enrollStudent = async (req, res) => {
  */
 const getStudents = async (req, res) => {
   try {
-    const students = await Student.find({}, 'studentId name department email createdAt')
-      .sort({ name: 1 })
-      .lean();
+    if (isMongoConnected()) {
+      const students = await Student.find({}, 'studentId name department email createdAt')
+        .sort({ studentId: 1 })
+        .lean();
 
+      return res.status(200).json({
+        success: true,
+        count: students.length,
+        data: students,
+      });
+    }
+
+    // Return in-memory students
     return res.status(200).json({
       success: true,
-      count: students.length,
-      data: students,
+      count: memoryStudents.length,
+      data: memoryStudents.map((s) => ({
+        studentId: s.studentId,
+        name: s.name,
+        department: s.department,
+        email: s.email,
+        createdAt: s.createdAt,
+      })),
     });
   } catch (error) {
     console.error('[Get Students Error]', error);
@@ -90,11 +125,23 @@ const getStudents = async (req, res) => {
  */
 const getStudentEmbeddings = async (req, res) => {
   try {
-    const students = await Student.find({}, 'studentId name faceEmbeddings').lean();
+    if (isMongoConnected()) {
+      const students = await Student.find({}, 'studentId name faceEmbeddings').lean();
+      return res.status(200).json({
+        success: true,
+        count: students.length,
+        data: students,
+      });
+    }
+
     return res.status(200).json({
       success: true,
-      count: students.length,
-      data: students,
+      count: memoryStudents.length,
+      data: memoryStudents.map((s) => ({
+        studentId: s.studentId,
+        name: s.name,
+        faceEmbeddings: s.faceEmbeddings,
+      })),
     });
   } catch (error) {
     console.error('[Get Embeddings Error]', error);
