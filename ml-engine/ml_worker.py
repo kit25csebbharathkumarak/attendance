@@ -5,12 +5,16 @@ import logging
 import cv2
 import requests
 import numpy as np
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 from detector import PersonDetector
 from face_matcher import FaceMatcher
 
-load_dotenv()
+
 
 logging.basicConfig(
     level=logging.INFO,
