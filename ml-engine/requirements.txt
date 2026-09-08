@@ -1,0 +1,14 @@
+# Computer Vision & Deep Learning
+ultralytics>=8.1.0
+deepface>=0.0.90
+opencv-python>=4.8.0
+numpy>=1.24.0
+scipy>=1.11.0
+
+# HTTP & Environment
+requests>=2.31.0
+python-dotenv>=1.0.0
+
+# DeepFace Backends (FaceNet / TF)
+tf-keras>=2.15.0
+pillow>=10.0.0
