@@ -263,8 +263,28 @@ const getTodayStats = async (req, res) => {
   }
 };
 
+/**
+ * @route   POST /api/webhook/frame
+ * @desc    Broadcast live camera frame from Python ML worker to React dashboard via Socket.IO
+ */
+const broadcastCameraFrame = (req, res) => {
+  const { frame } = req.body;
+  if (!frame) {
+    return res.status(400).json({ success: false, message: 'Frame data is required' });
+  }
+
+  const io = req.app.get('io');
+  if (io) {
+    io.emit('live_frame', { frame, timestamp: Date.now() });
+  }
+
+  return res.status(200).json({ success: true });
+};
+
 module.exports = {
   getTodayAttendance,
   recordMatchWebhook,
   getTodayStats,
+  broadcastCameraFrame,
 };
+

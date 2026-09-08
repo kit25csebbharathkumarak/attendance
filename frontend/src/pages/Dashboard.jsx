@@ -29,40 +29,28 @@ export const Dashboard = () => {
   const [highlightedId, setHighlightedId] = useState(null);
   const [simulating, setSimulating] = useState(false);
 
-  // Live Webcam Feed on Dashboard
-  const [cameraActive, setCameraActive] = useState(false);
-  const videoRef = useRef(null);
-  const streamRef = useRef(null);
-
-  const startCamera = async () => {
-    try {
-      setCameraActive(true);
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
-    } catch (err) {
-      console.warn('Dashboard webcam access not granted:', err);
-      setCameraActive(false);
-    }
-  };
-
-  const stopCamera = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-    setCameraActive(false);
-  };
+  // Live ML Worker Frame Streaming via WebSocket
+  const [liveFrame, setLiveFrame] = useState(null);
+  const [lastFrameTime, setLastFrameTime] = useState(0);
 
   useEffect(() => {
-    return () => {
-      stopCamera();
+    if (!socket) return;
+
+    const handleLiveFrame = (data) => {
+      if (data?.frame) {
+        setLiveFrame(data.frame);
+        setLastFrameTime(Date.now());
+      }
     };
-  }, []);
+
+    socket.on('live_frame', handleLiveFrame);
+
+    return () => {
+      socket.off('live_frame', handleLiveFrame);
+    };
+  }, [socket]);
+
+  const isWorkerStreaming = Date.now() - lastFrameTime < 4000 && !!liveFrame;
 
   // 1. Fetch Today's Initial Attendance on Mount
   const fetchTodayAttendance = async () => {
@@ -91,13 +79,11 @@ export const Dashboard = () => {
     const handleNewAttendance = (newRecord) => {
       console.log('[Socket Event Received] new_attendance:', newRecord);
 
-      // Prepend to state array of presentStudents
       setPresentStudents((prev) => {
         const filtered = prev.filter((item) => item.studentId !== newRecord.studentId);
         return [newRecord, ...filtered];
       });
 
-      // Highlight the incoming record for 3 seconds
       setHighlightedId(newRecord.studentId);
       setTimeout(() => {
         setHighlightedId(null);
@@ -110,6 +96,8 @@ export const Dashboard = () => {
       socket.off('new_attendance', handleNewAttendance);
     };
   }, [socket]);
+
+
 
   // 3. Simulated Match Event Trigger (Test)
   const triggerSimulatedMatch = async () => {
@@ -214,17 +202,6 @@ export const Dashboard = () => {
 
         {/* Action Controls */}
         <div className="flex flex-wrap items-center gap-2.5">
-          <button
-            onClick={cameraActive ? stopCamera : startCamera}
-            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-semibold border transition-all ${
-              cameraActive
-                ? 'bg-rose-500/20 border-rose-500/40 text-rose-300'
-                : 'bg-dark-900 border-white/10 text-slate-300 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <Video className="w-4 h-4 text-brand-400" />
-            {cameraActive ? 'Stop Live Feed' : 'Live Camera View'}
-          </button>
 
           <button
             onClick={triggerSimulatedMatch}
@@ -259,26 +236,28 @@ export const Dashboard = () => {
                 Entrance Camera Live Stream (Classroom 301)
               </h3>
             </div>
-            <span className="text-xs px-2 py-0.5 rounded-full bg-brand-500/10 text-brand-400 border border-brand-500/20 font-medium flex items-center gap-1">
+            <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium flex items-center gap-1 border ${
+              isWorkerStreaming
+                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                : 'bg-brand-500/10 text-brand-400 border-brand-500/20'
+            }`}>
               <Eye className="w-3 h-3" />
-              {cameraActive ? 'Streaming Active' : 'Standby Mode'}
+              {isWorkerStreaming ? 'Worker Streaming Live' : 'Worker Standby'}
             </span>
           </div>
 
           <div className="relative rounded-xl overflow-hidden bg-black aspect-video flex items-center justify-center border border-white/10 shadow-inner">
-            {cameraActive ? (
+            {isWorkerStreaming ? (
               <>
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="w-full h-full object-cover transform -scale-x-100"
+                <img
+                  src={liveFrame}
+                  alt="Live Camera Stream"
+                  className="w-full h-full object-cover"
                 />
                 {/* On-screen HUD Bar */}
-                <div className="absolute top-3 left-3 px-3 py-1 rounded-lg bg-black/70 backdrop-blur-md border border-white/10 text-xs text-emerald-400 font-semibold flex items-center gap-1.5">
+                <div className="absolute top-3 left-3 px-3 py-1 rounded-lg bg-black/80 backdrop-blur-md border border-emerald-500/30 text-xs text-emerald-400 font-semibold flex items-center gap-1.5 shadow-lg">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 live-pulse" />
-                  YOLOv8 + MTCNN Face Tracking Active
+                  YOLOv8 + FaceNet Camera Worker (Active Stream)
                 </div>
               </>
             ) : (
@@ -287,21 +266,15 @@ export const Dashboard = () => {
                   <Video className="w-7 h-7 text-slate-500" />
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-slate-300">Live Entrance Feed Preview</p>
+                  <p className="text-sm font-semibold text-slate-300">Live Entrance Feed Standby</p>
                   <p className="text-xs text-slate-500 mt-1 max-w-sm">
-                    Click "Live Camera View" above to watch your live webcam stream directly on this dashboard.
+                    Run <code className="text-emerald-400 font-mono bg-dark-900 px-1.5 py-0.5 rounded border border-white/5">python ml_worker.py</code> in your terminal. The camera feed with AI bounding boxes will appear here in real time!
                   </p>
                 </div>
-                <button
-                  onClick={startCamera}
-                  className="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold shadow-md transition-all flex items-center gap-1.5"
-                >
-                  <Camera className="w-3.5 h-3.5" />
-                  Turn On Live Video
-                </button>
               </div>
             )}
           </div>
+
         </div>
 
         {/* Latest Verified Match Spotlight */}

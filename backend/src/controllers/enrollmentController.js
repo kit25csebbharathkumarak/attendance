@@ -2,7 +2,8 @@ const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
 const Student = require('../models/Student');
-const { isMongoConnected, memoryStudents } = require('../config/dataStore');
+const { isMongoConnected, memoryStudents, saveStudentsToFile } = require('../config/dataStore');
+
 
 // Helper to extract real embeddings via Python FaceNet script
 const extractRealEmbeddingFromImage = (base64Data) => {
@@ -138,6 +139,8 @@ const enrollStudent = async (req, res) => {
     } else {
       memoryStudents.push(newStudent);
     }
+    saveStudentsToFile();
+
 
     return res.status(200).json({
       success: true,

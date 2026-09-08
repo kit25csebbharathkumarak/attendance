@@ -11,6 +11,7 @@ const {
   getTodayAttendance,
   recordMatchWebhook,
   getTodayStats,
+  broadcastCameraFrame,
 } = require('../controllers/attendanceController');
 
 // Enrollment Routes
@@ -22,7 +23,9 @@ router.get('/students/embeddings', getStudentEmbeddings);
 router.get('/attendance/today', getTodayAttendance);
 router.get('/attendance/stats', getTodayStats);
 
-// Python ML Worker Ingestion Webhook
+// Python ML Worker Ingestion Webhooks
 router.post('/webhook/match', recordMatchWebhook);
+router.post('/webhook/frame', broadcastCameraFrame);
 
 module.exports = router;
+
