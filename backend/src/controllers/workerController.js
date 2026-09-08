@@ -29,16 +29,15 @@ const startWorker = (req, res) => {
       });
     }
 
-    const scriptPath = path.resolve(__dirname, '../../../ml-engine/ml_worker.py');
     const cwd = path.resolve(__dirname, '../../../ml-engine');
 
-    console.log(`[Worker Manager] Spawning Python worker: ${scriptPath}`);
+    console.log(`[Worker Manager] Spawning Python worker in: ${cwd}`);
     workerLogs = [`[System] Starting Python ML Worker at ${new Date().toLocaleTimeString()}...`];
 
-    // Spawn python process
-    workerProcess = spawn('python', [scriptPath], {
+    // Spawn python process inside ml-engine working directory
+    workerProcess = spawn('python', ['ml_worker.py'], {
       cwd,
-      env: { ...process.env, SHOW_DISPLAY_WINDOW: 'true', PYTHONUNBUFFERED: '1' },
+      env: { ...process.env, SHOW_DISPLAY_WINDOW: 'false', PYTHONUNBUFFERED: '1' },
       shell: true,
     });
 
