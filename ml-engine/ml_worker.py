@@ -2,9 +2,11 @@ import os
 import sys
 import time
 import logging
+import base64
 import cv2
 import requests
 import numpy as np
+
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -13,8 +15,6 @@ except ImportError:
 
 from detector import PersonDetector
 from face_matcher import FaceMatcher
-
-
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,23 +27,24 @@ BACKEND_WEBHOOK_URL = os.getenv("BACKEND_WEBHOOK_URL", "http://localhost:5000/ap
 BACKEND_EMBEDDINGS_URL = os.getenv("BACKEND_ENROLLMENTS_URL", "http://localhost:5000/api/students/embeddings")
 CAMERA_SOURCE = os.getenv("CAMERA_SOURCE", "0")
 FRAME_THROTTLE_SECONDS = float(os.getenv("FRAME_THROTTLE_SECONDS", "3.0"))
-SIMILARITY_THRESHOLD = float(os.getenv("MATCH_CONFIDENCE_THRESHOLD", "0.60"))
+SIMILARITY_THRESHOLD = float(os.getenv("MATCH_CONFIDENCE_THRESHOLD", "0.52"))
 SHOW_DISPLAY = os.getenv("SHOW_DISPLAY_WINDOW", "true").lower() == "true"
 
 
-def send_to_backend(student_id: str, confidence: float, match_type: str = "Multimodal") -> bool:
+def send_to_backend(student_id: str, confidence: float, match_type: str = "Multimodal", photo: str = None) -> bool:
     """
-    Sends detected student match to Node.js backend webhook endpoint.
+    Sends detected student match with face photo thumbnail to Node.js backend webhook endpoint.
     """
     payload = {
         "studentId": student_id,
         "matchType": match_type,
         "confidence": round(float(confidence), 3),
-        "doorLocation": "Classroom Main Entrance"
+        "doorLocation": "Classroom Main Entrance",
+        "photo": photo
     }
 
     try:
-        logger.info(f"Dispatching real match to backend: {payload}")
+        logger.info(f"Dispatching real match to backend: Student {student_id} (Confidence: {confidence:.2f})")
         response = requests.post(
             BACKEND_WEBHOOK_URL,
             json=payload,
@@ -74,16 +75,16 @@ def main():
     print("\n" + "=" * 65)
     print("🚀 AUTOMATIC ATTENDANCE ENGINE (REAL AI MODELS)")
     print("   • Person Localization: YOLOv8 (yolov8n.pt)")
+    print("   • Face Localization: MTCNN Deep Neural Network")
     print("   • Feature Extraction: FaceNet (InceptionResnetV1, 512-d)")
-    print(f"   • Similarity Metric: Cosine Vector Similarity (Threshold: {SIMILARITY_THRESHOLD})")
+    print(f"   • Similarity Metric: Cosine Similarity (Threshold: {SIMILARITY_THRESHOLD})")
     print(f"   • Backend Webhook: {BACKEND_WEBHOOK_URL}")
     print("=" * 65 + "\n")
 
-    # Initialize Real Neural Network Models
     logger.info("Loading YOLOv8 person detector...")
     detector = PersonDetector(model_weight="yolov8n.pt", conf_threshold=0.45)
 
-    logger.info("Loading FaceNet InceptionResnetV1 model...")
+    logger.info("Loading FaceNet InceptionResnetV1 & MTCNN...")
     matcher = FaceMatcher(similarity_threshold=SIMILARITY_THRESHOLD)
 
     # Fetch enrolled student embeddings from Backend
@@ -115,14 +116,13 @@ def main():
                     time.sleep(0.1)
                     continue
             else:
-                # Dark canvas with instructions
                 frame = np.zeros((480, 640, 3), dtype=np.uint8)
                 frame[:] = (30, 30, 35)
                 cv2.rectangle(frame, (200, 100), (440, 400), (60, 60, 75), 2)
                 cv2.circle(frame, (320, 180), 55, (100, 100, 120), 2)
-                cv2.putText(frame, "SIMULATED ENTRANCE FEED", (180, 50),
+                cv2.putText(frame, "ENTRANCE CAMERA FEED", (180, 50),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 230, 118), 2)
-                cv2.putText(frame, "Connect camera or enroll student to test real matching", (110, 440),
+                cv2.putText(frame, "Stand in front of webcam to be recognized", (140, 440),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (160, 160, 160), 1)
 
             frame_count += 1
@@ -132,7 +132,7 @@ def main():
                 last_processed_time = current_time
                 recent_detections = []
 
-                # Refresh enrollments periodically (every 10 scans)
+                # Refresh enrollments periodically
                 if frame_count % 10 == 0:
                     matcher.load_enrolled_students(backend_url=BACKEND_EMBEDDINGS_URL)
 
@@ -147,11 +147,21 @@ def main():
                         continue
 
                     # B. Extract FaceNet 512-d Embedding & Match
-                    matched_id, student_name, confidence, match_type = matcher.match_face(person_crop)
+                    matched_id, student_name, confidence, match_type, face_crop = matcher.match_face(person_crop)
+
+                    # Encode thumbnail photo
+                    photo_b64 = None
+                    if face_crop is not None and face_crop.size > 0:
+                        try:
+                            thumb = cv2.resize(face_crop, (160, 160))
+                            _, buf = cv2.imencode('.jpg', thumb, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                            photo_b64 = "data:image/jpeg;base64," + base64.b64encode(buf).decode('utf-8')
+                        except Exception as e:
+                            logger.debug(f"Thumbnail encoding error: {e}")
 
                     if matched_id:
-                        logger.info(f"🎯 Verified Student: {student_name} ({matched_id}) [Score: {confidence:.2f}]")
-                        send_to_backend(matched_id, confidence, match_type)
+                        logger.info(f"🎯 Verified Student: {student_name} ({matched_id}) [Cosine Score: {confidence:.3f}]")
+                        send_to_backend(matched_id, confidence, match_type, photo=photo_b64)
                         recent_detections.append({
                             "bbox": (x1, y1, x2, y2),
                             "matched": True,
@@ -160,12 +170,12 @@ def main():
                             "type": match_type
                         })
                     else:
-                        # Person visible, but face not yet matched
+                        logger.info(f"Person detected (Confidence: {p['confidence']:.2f}). Face similarity below threshold: {confidence:.3f}")
                         recent_detections.append({
                             "bbox": (x1, y1, x2, y2),
                             "matched": False,
-                            "label": "Person (Scanning...)",
-                            "confidence": p["confidence"],
+                            "label": f"Scanning... ({confidence:.2f})",
+                            "confidence": confidence,
                             "type": "Body"
                         })
 
@@ -187,11 +197,9 @@ def main():
                     is_match = det["matched"]
                     tag = f"{det['label']} [{(det['confidence']*100):.0f}%]"
 
-                    # Green for matched, orange for scanning
                     color = (0, 230, 110) if is_match else (0, 165, 255)
 
                     cv2.rectangle(display_frame, (bx1, by1), (bx2, by2), color, 2)
-                    # Text banner
                     tw = len(tag) * 9 + 10
                     cv2.rectangle(display_frame, (bx1, max(0, by1 - 24)), (bx1 + tw, by1), color, -1)
                     cv2.putText(display_frame, tag, (bx1 + 5, max(16, by1 - 6)),

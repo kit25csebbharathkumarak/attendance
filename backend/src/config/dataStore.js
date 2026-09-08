@@ -14,7 +14,7 @@ for (let i = 1; i <= 65; i++) {
     name: `${firstName} ${lastName}`,
     department: 'Computer Science',
     email: `${firstName.toLowerCase()}.${lastName.toLowerCase()}@university.edu`,
-    faceEmbeddings: [Array.from({ length: 128 }, () => Math.random() * 0.2 - 0.1)],
+    faceEmbeddings: [Array.from({ length: 512 }, () => Math.random() * 0.2 - 0.1)],
     createdAt: new Date(Date.now() - (65 - i) * 3600000),
   });
 }

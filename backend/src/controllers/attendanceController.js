@@ -157,6 +157,7 @@ const recordMatchWebhook = async (req, res) => {
         matchType: created.matchType,
         confidence: created.confidence,
         doorLocation: created.doorLocation,
+        photo: req.body.photo || student?.avatarUrl || null,
       };
     } else {
       // In-Memory store fallback
@@ -175,9 +176,11 @@ const recordMatchWebhook = async (req, res) => {
         matchType: sanitizedMatchType,
         confidence: parsedConfidence,
         doorLocation: req.body.doorLocation || 'Classroom Entrance Main Door',
+        photo: req.body.photo || student?.avatarUrl || null,
       };
 
       memoryAttendanceLogs.unshift(newLogRecord);
+
     }
 
     // Update in-memory cache

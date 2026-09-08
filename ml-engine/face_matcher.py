@@ -96,19 +96,19 @@ class FaceMatcher:
             logger.debug(f"Error during MTCNN/FaceNet feature extraction: {e}")
             return None
 
-    def match_face(self, person_crop: np.ndarray) -> Tuple[Optional[str], Optional[str], float, str]:
+    def match_face(self, person_crop: np.ndarray) -> Tuple[Optional[str], Optional[str], float, str, Optional[np.ndarray]]:
         """
         Given a person crop from YOLOv8, detects face with MTCNN, extracts 512-d embedding,
         and computes cosine similarity against enrolled students.
         
-        :return: (studentId, studentName, confidence, matchType)
+        :return: (studentId, studentName, confidence, matchType, face_crop)
         """
         query_emb = self.extract_embedding(person_crop)
         if query_emb is None:
-            return None, None, 0.0, "Body"
+            return None, None, 0.0, "Body", None
 
         if not self.enrolled_students:
-            return None, None, 0.0, "Unenrolled"
+            return None, None, 0.0, "Unenrolled", None
 
         best_student_id = None
         best_student_name = None
@@ -128,6 +128,9 @@ class FaceMatcher:
                 candidates = [np.array(e, dtype=np.float32) for e in embeddings if len(e) > 0]
 
             for cand in candidates:
+                if cand.shape != query_emb.shape:
+                    continue
+
                 cand_norm = np.linalg.norm(cand)
                 if cand_norm > 0:
                     cand = cand / cand_norm
@@ -139,7 +142,8 @@ class FaceMatcher:
                     best_student_name = s_name
 
         if best_similarity >= self.similarity_threshold:
-            match_type = "Multimodal" if best_similarity >= 0.72 else "Face"
-            return best_student_id, best_student_name, best_similarity, match_type
+            match_type = "Multimodal" if best_similarity >= 0.65 else "Face"
+            return best_student_id, best_student_name, best_similarity, match_type, person_crop
 
-        return None, None, max(0.0, best_similarity), "Face"
+        return None, None, max(0.0, best_similarity), "Face", person_crop
+
