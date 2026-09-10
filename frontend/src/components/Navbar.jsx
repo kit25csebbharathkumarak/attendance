@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Camera, Radio, Users, UserPlus, Clock } from 'lucide-react';
-import { useSocket } from '../context/SocketContext';
+import { Camera, Users, UserPlus, Clock } from 'lucide-react';
 
 export const Navbar = ({ activeTab, setActiveTab }) => {
-  const { isConnected } = useSocket();
   const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
 
   useEffect(() => {
@@ -65,22 +63,6 @@ export const Navbar = ({ activeTab, setActiveTab }) => {
           <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-sandal-100 border border-sandal-200 text-xs font-medium text-red-900/80">
             <Clock className="w-3.5 h-3.5 text-red-600" />
             <span>{currentTime}</span>
-          </div>
-
-          {/* Connection Status Pill */}
-          <div
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border transition-all ${
-              isConnected
-                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                : 'bg-red-50 text-red-700 border-red-200'
-            }`}
-          >
-            <span
-              className={`w-2 h-2 rounded-full ${
-                isConnected ? 'bg-emerald-500 live-pulse' : 'bg-red-500'
-              }`}
-            />
-            <span>{isConnected ? 'Online' : 'Offline'}</span>
           </div>
         </div>
       </div>

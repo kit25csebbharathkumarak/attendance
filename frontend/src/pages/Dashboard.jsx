@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Users,
   Search,
@@ -21,6 +21,88 @@ import {
 } from 'lucide-react';
 import { useSocket } from '../context/SocketContext';
 import { StatsCards } from '../components/StatsCards';
+
+const CameraStreamViewport = React.memo(({ socket, workerRunning, workerLoading, toggleWorker }) => {
+  const [frame, setFrame] = useState(null);
+  const [isActive, setIsActive] = useState(false);
+  const lastTimeRef = useRef(0);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleLiveFrame = (data) => {
+      if (data?.frame) {
+        setFrame(data.frame);
+        lastTimeRef.current = Date.now();
+        setIsActive(true);
+      }
+    };
+
+    socket.on('live_frame', handleLiveFrame);
+
+    const timer = setInterval(() => {
+      if (Date.now() - lastTimeRef.current > 3000) {
+        setIsActive(false);
+      }
+    }, 1000);
+
+    return () => {
+      socket.off('live_frame', handleLiveFrame);
+      clearInterval(timer);
+    };
+  }, [socket]);
+
+  useEffect(() => {
+    if (!workerRunning) {
+      setFrame(null);
+      setIsActive(false);
+    }
+  }, [workerRunning]);
+
+  return (
+    <div className="relative rounded-xl overflow-hidden bg-sandal-50/80 border border-sandal-200 aspect-video flex items-center justify-center shadow-inner">
+      {isActive && frame ? (
+        <>
+          <img
+            src={frame}
+            alt="Live Camera Stream"
+            className="w-full h-full object-cover"
+          />
+          <div className="absolute top-3 left-3 px-2.5 py-1 rounded-lg bg-white/90 backdrop-blur-md border border-red-200 text-xs text-red-600 font-bold flex items-center gap-1.5 shadow-sm">
+            <span className="w-2 h-2 rounded-full bg-red-600 live-pulse" />
+            Live Feed
+          </div>
+        </>
+      ) : (
+        <div className="flex flex-col items-center justify-center gap-2.5 p-6 text-center">
+          <div className="w-12 h-12 rounded-2xl bg-white border border-sandal-300 flex items-center justify-center text-red-600 shadow-sm">
+            <Camera className="w-6 h-6" />
+          </div>
+          <div>
+            <p className="text-sm font-bold text-red-950">
+              {workerRunning ? 'Connecting to camera...' : 'Camera Standby'}
+            </p>
+            <p className="text-xs text-red-900/60 mt-0.5">
+              {workerRunning
+                ? 'Acquiring hardware video stream...'
+                : 'Click start to begin recognition'}
+            </p>
+          </div>
+          {!workerRunning && (
+            <button
+              onClick={() => toggleWorker()}
+              disabled={workerLoading}
+              className="mt-1 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-md shadow-red-600/20 transition-all flex items-center gap-1.5"
+            >
+              <Play className="w-3.5 h-3.5 fill-current" />
+              Start Camera
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+});
 
 export const Dashboard = () => {
   const { socket, isConnected } = useSocket();
@@ -50,10 +132,6 @@ export const Dashboard = () => {
     { id: '3', label: 'Camera 3 (External Device)' },
     { id: 'custom', label: '🌐 Custom IP / RTSP Stream URL' },
   ]);
-
-  // Live Stream State
-  const [liveFrame, setLiveFrame] = useState(null);
-  const [lastFrameTime, setLastFrameTime] = useState(0);
 
   // Reset Modal State
   const [showResetModal, setShowResetModal] = useState(false);
@@ -148,23 +226,12 @@ export const Dashboard = () => {
       }, 3000);
     };
 
-    // Listen to live camera frames from Python ML worker
-    const handleLiveFrame = (data) => {
-      if (data?.frame) {
-        setLiveFrame(data.frame);
-        setLastFrameTime(Date.now());
-      }
-    };
-
     // Listen to worker status updates
     const handleWorkerStatus = (data) => {
       setWorkerRunning(data.running);
       setWorkerPid(data.pid);
       if (data.cameraSource) {
         setCameraSource(data.cameraSource);
-      }
-      if (!data.running) {
-        setLiveFrame(null);
       }
     };
 
@@ -175,16 +242,22 @@ export const Dashboard = () => {
       fetchEnrolledCount();
     };
 
+    // Listen to student deletions to update stats
+    const handleStudentDeleted = () => {
+      fetchEnrolledCount();
+      fetchTodayAttendance();
+    };
+
     socket.on('new_attendance', handleNewAttendance);
-    socket.on('live_frame', handleLiveFrame);
     socket.on('worker_status', handleWorkerStatus);
     socket.on('data_reset', handleDataReset);
+    socket.on('student_deleted', handleStudentDeleted);
 
     return () => {
       socket.off('new_attendance', handleNewAttendance);
-      socket.off('live_frame', handleLiveFrame);
       socket.off('worker_status', handleWorkerStatus);
       socket.off('data_reset', handleDataReset);
+      socket.off('student_deleted', handleStudentDeleted);
     };
   }, [socket]);
 
@@ -201,7 +274,6 @@ export const Dashboard = () => {
         if (res.ok) {
           setWorkerRunning(false);
           setWorkerPid(null);
-          setLiveFrame(null);
         }
       } else {
         const res = await fetch('/api/worker/start', {
@@ -240,7 +312,6 @@ export const Dashboard = () => {
       const res = await fetch('/api/system/reset', { method: 'POST' });
       if (res.ok) {
         setPresentStudents([]);
-        setLatestMatch(null);
         setShowResetModal(false);
       }
     } catch (e) {
@@ -249,9 +320,6 @@ export const Dashboard = () => {
       setResetting(false);
     }
   };
-
-  // Check if live stream from Python worker is active
-  const isStreamActive = Date.now() - lastFrameTime < 3500 && !!liveFrame;
 
   // 4. Compute Metrics for KPI Cards
   const stats = useMemo(() => {
@@ -313,20 +381,8 @@ export const Dashboard = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h2 className="text-2xl font-black text-red-950 tracking-tight flex items-center gap-2">
+          <h2 className="text-2xl font-black text-red-950 tracking-tight">
             Attendance Dashboard
-            <span
-              className={`text-xs px-2.5 py-0.5 rounded-full font-semibold flex items-center gap-1.5 border ${workerRunning
-                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                  : 'bg-sandal-100 text-sandal-800 border-sandal-300'
-                }`}
-            >
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${workerRunning ? 'bg-emerald-500 live-pulse' : 'bg-sandal-500'
-                  }`}
-              />
-              {workerRunning ? 'Camera Active' : 'Camera Standby'}
-            </span>
           </h2>
           <p className="text-xs text-red-900/60 mt-0.5">
             Automatic walk-through attendance tracking
@@ -433,48 +489,12 @@ export const Dashboard = () => {
           )}
 
           {/* Viewport Box (Zero Navy/Black - Warm Sandal Standby) */}
-          <div className="relative rounded-xl overflow-hidden bg-sandal-50/80 border border-sandal-200 aspect-video flex items-center justify-center shadow-inner">
-            {isStreamActive ? (
-              <>
-                <img
-                  src={liveFrame}
-                  alt="Live Camera Stream"
-                  className="w-full h-full object-cover"
-                />
-                {/* On-screen Live Pill */}
-                <div className="absolute top-3 left-3 px-2.5 py-1 rounded-lg bg-white/90 backdrop-blur-md border border-red-200 text-xs text-red-600 font-bold flex items-center gap-1.5 shadow-sm">
-                  <span className="w-2 h-2 rounded-full bg-red-600 live-pulse" />
-                  Live Feed
-                </div>
-              </>
-            ) : (
-              <div className="flex flex-col items-center justify-center gap-2.5 p-6 text-center">
-                <div className="w-12 h-12 rounded-2xl bg-white border border-sandal-300 flex items-center justify-center text-red-600 shadow-sm">
-                  <Camera className="w-6 h-6" />
-                </div>
-                <div>
-                  <p className="text-sm font-bold text-red-950">
-                    {workerRunning ? 'Connecting to camera...' : 'Camera Standby'}
-                  </p>
-                  <p className="text-xs text-red-900/60 mt-0.5">
-                    {workerRunning
-                      ? 'Stream initializing'
-                      : 'Click start to begin recognition'}
-                  </p>
-                </div>
-                {!workerRunning && (
-                  <button
-                    onClick={() => toggleWorker()}
-                    disabled={workerLoading}
-                    className="mt-1 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-md shadow-red-600/20 transition-all flex items-center gap-1.5"
-                  >
-                    <Play className="w-3.5 h-3.5 fill-current" />
-                    Start Camera
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
+          <CameraStreamViewport
+            socket={socket}
+            workerRunning={workerRunning}
+            workerLoading={workerLoading}
+            toggleWorker={toggleWorker}
+          />
         </div>
 
         {/* Latest Verified Match Spotlight */}

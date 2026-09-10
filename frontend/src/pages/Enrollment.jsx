@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { UserPlus, Users, CheckCircle, AlertCircle, Camera, Upload, RefreshCw, Sparkles } from 'lucide-react';
+import { UserPlus, Users, CheckCircle, AlertCircle, Camera, Upload, RefreshCw, Sparkles, Trash2, AlertTriangle } from 'lucide-react';
+import { useSocket } from '../context/SocketContext';
 
 export const Enrollment = () => {
   const [studentId, setStudentId] = useState('');
@@ -17,6 +18,10 @@ export const Enrollment = () => {
   const streamRef = useRef(null);
 
   const [workerRunning, setWorkerRunning] = useState(false);
+
+  const { socket } = useSocket();
+  const [studentToDelete, setStudentToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   const fetchEnrolled = async () => {
     try {
@@ -47,6 +52,54 @@ export const Enrollment = () => {
       stopCamera();
     };
   }, []);
+
+  // Listen to student deletion events from socket
+  useEffect(() => {
+    if (!socket) return;
+    const handleStudentDeleted = () => {
+      fetchEnrolled();
+    };
+    socket.on('student_deleted', handleStudentDeleted);
+    return () => {
+      socket.off('student_deleted', handleStudentDeleted);
+    };
+  }, [socket]);
+
+  // Delete a student profile
+  const confirmDeleteStudent = async () => {
+    if (!studentToDelete) return;
+    try {
+      setDeleting(true);
+      const res = await fetch(`/api/students/${encodeURIComponent(studentToDelete.studentId)}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setMessage({
+          type: 'success',
+          text: data.message || `Student ${studentToDelete.name} deleted successfully.`,
+        });
+        setEnrolledList((prev) =>
+          prev.filter((s) => String(s.studentId).trim() !== String(studentToDelete.studentId).trim())
+        );
+        fetchEnrolled();
+      } else {
+        setMessage({
+          type: 'error',
+          text: data.message || 'Failed to delete student record.',
+        });
+      }
+    } catch (err) {
+      console.error('Delete error:', err);
+      setMessage({
+        type: 'error',
+        text: 'Network error while attempting to delete student.',
+      });
+    } finally {
+      setDeleting(false);
+      setStudentToDelete(null);
+    }
+  };
 
   // Start Browser Webcam Feed
   const startCamera = async () => {
@@ -120,6 +173,11 @@ export const Enrollment = () => {
     e.preventDefault();
     if (!studentId || !name) {
       setMessage({ type: 'error', text: 'Student ID and Name are required.' });
+      return;
+    }
+
+    if (!capturedImage) {
+      setMessage({ type: 'error', text: 'Please take a photo with the camera or upload a photo to enroll.' });
       return;
     }
 
@@ -368,13 +426,14 @@ export const Enrollment = () => {
                     <th className="py-3 px-5">Student</th>
                     <th className="py-3 px-5">Roll No</th>
                     <th className="py-3 px-5">Department</th>
-                    <th className="py-3 px-5 text-right">Status</th>
+                    <th className="py-3 px-5 text-center">Status</th>
+                    <th className="py-3 px-5 text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-sandal-100 text-xs">
                   {enrolledList.length === 0 ? (
                     <tr>
-                      <td colSpan="4" className="py-10 text-center text-red-900/50">
+                      <td colSpan="5" className="py-10 text-center text-red-900/50">
                         No students enrolled yet.
                       </td>
                     </tr>
@@ -388,10 +447,21 @@ export const Enrollment = () => {
                           </span>
                         </td>
                         <td className="py-3 px-5 text-red-900/70 font-medium">{stu.department}</td>
-                        <td className="py-3 px-5 text-right">
+                        <td className="py-3 px-5 text-center">
                           <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
                             Enrolled
                           </span>
+                        </td>
+                        <td className="py-3 px-5 text-right">
+                          <button
+                            type="button"
+                            onClick={() => setStudentToDelete(stu)}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold text-red-700 bg-red-50 hover:bg-red-600 hover:text-white rounded-lg border border-red-200 hover:border-red-600 transition-all shadow-sm group"
+                            title={`Delete ${stu.name}`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5 text-red-600 group-hover:text-white transition-colors" />
+                            <span>Delete</span>
+                          </button>
                         </td>
                       </tr>
                     ))
@@ -402,6 +472,55 @@ export const Enrollment = () => {
           </div>
         </div>
       </div>
+
+      {/* Confirmation Modal to Delete Student */}
+      {studentToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-red-950/40 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl border border-sandal-200 p-6 max-w-sm w-full shadow-xl space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-600 shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-red-950">Delete Student Record?</h3>
+                <p className="text-xs text-red-900/70 mt-1 leading-relaxed">
+                  Are you sure you want to delete <span className="font-bold text-red-950">{studentToDelete.name}</span> (Roll No: <span className="font-mono font-bold text-red-800">{studentToDelete.studentId}</span>)?
+                </p>
+                <p className="text-[11px] text-red-900/50 mt-1">This will permanently remove their profile and face embeddings.</p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => setStudentToDelete(null)}
+                className="px-3.5 py-1.5 rounded-xl bg-sandal-50 hover:bg-sandal-100 text-red-900 text-xs font-semibold border border-sandal-200 transition-all disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={confirmDeleteStudent}
+                className="px-3.5 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-sm transition-all disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {deleting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Delete Record
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -89,23 +89,25 @@ const enrollStudent = async (req, res) => {
 
     let finalEmbeddings = faceEmbeddings || [];
 
-    // If a real image was captured from the webcam or uploaded, extract real FaceNet embedding!
-    if (image && typeof image === 'string' && image.length > 50) {
+    // Extract real 512-d FaceNet embedding from captured photo
+    const photoData = image || avatarUrl;
+    if (photoData && typeof photoData === 'string' && photoData.length > 50) {
       console.log(`[Enrollment] Extracting real FaceNet 512-d embeddings for ${cleanName} (${cleanId})...`);
-      const realEmbedding = await extractRealEmbeddingFromImage(image);
+      const realEmbedding = await extractRealEmbeddingFromImage(photoData);
       if (realEmbedding && realEmbedding.length === 512) {
         finalEmbeddings = [realEmbedding];
         console.log(`[Enrollment] ✅ Successfully extracted real FaceNet embedding for ${cleanName}!`);
       } else {
-        console.warn('[Enrollment] FaceNet could not locate face in image; fallback to normalized vector.');
+        return res.status(400).json({
+          success: false,
+          message: 'FaceNet could not locate a face in the provided photo. Please ensure the student is looking directly at the camera with clear lighting and retry.',
+        });
       }
-    }
-
-    // Ensure we have at least one embedding vector
-    if (!finalEmbeddings || finalEmbeddings.length === 0) {
-      // Fallback to random 512-d normalized vector if neither image nor embeddings were provided
-      const dummy = Array.from({ length: 512 }, () => Math.random() * 0.2 - 0.1);
-      finalEmbeddings = [dummy];
+    } else if (!finalEmbeddings || finalEmbeddings.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'A student photo is required to enroll for facial recognition attendance.',
+      });
     }
 
     if (isMongoConnected()) {
@@ -268,7 +270,7 @@ const deleteStudent = async (req, res) => {
       await Student.findOneAndDelete({ studentId: cleanId });
     }
 
-    const index = memoryStudents.findIndex((s) => s.studentId === cleanId);
+    const index = memoryStudents.findIndex((s) => String(s.studentId).trim() === cleanId);
     let removedName = cleanId;
     if (index >= 0) {
       removedName = memoryStudents[index].name;
