@@ -98,38 +98,44 @@ class FaceMatcher:
 
         return len(self.enrolled_students)
 
-    def detect_all_faces(self, frame: np.ndarray, conf_threshold: float = 0.50) -> Tuple[List[Tuple[int, int, int, int]], List[float]]:
+    def detect_all_faces(self, frame: np.ndarray, conf_threshold: float = 0.50, return_landmarks: bool = False) -> Any:
         """
         Detects all faces across the entire frame in a single ~20ms pass.
         Returns:
-            boxes: List of (x1, y1, x2, y2) bounding boxes in original frame coordinates
-            scores: List of detection confidence scores
+            If return_landmarks=False: (boxes, scores)
+            If return_landmarks=True: (boxes, scores, landmarks)
         """
         if frame is None or frame.size == 0:
-            return [], []
+            return ([], [], []) if return_landmarks else ([], [])
 
         h, w = frame.shape[:2]
-        # For ultra-fast multi-face detection, scale frame if width > 640 while maintaining aspect ratio
+        # For ultra-fast multi-face detection (optimized for 65+ students in classroom)
+        target_width = 512.0
         scale_factor = 1.0
-        if w > 640:
-            scale_factor = 640.0 / w
-            det_frame = cv2.resize(frame, (640, int(h * scale_factor)))
+        if w > target_width:
+            scale_factor = target_width / w
+            det_frame = cv2.resize(frame, (int(target_width), int(h * scale_factor)))
         else:
             det_frame = frame
 
         try:
             rgb = cv2.cvtColor(det_frame, cv2.COLOR_BGR2RGB)
             pil_img = Image.fromarray(rgb)
-            boxes, probs = self.mtcnn.detect(pil_img)
+            if return_landmarks:
+                boxes, probs, raw_landmarks = self.mtcnn.detect(pil_img, landmarks=True)
+            else:
+                boxes, probs = self.mtcnn.detect(pil_img)
+                raw_landmarks = None
 
             if boxes is None or len(boxes) == 0:
-                return [], []
+                return ([], [], []) if return_landmarks else ([], [])
 
             valid_boxes = []
             valid_scores = []
+            valid_landmarks = []
             inv_scale = 1.0 / scale_factor
 
-            for box, prob in zip(boxes, probs):
+            for idx, (box, prob) in enumerate(zip(boxes, probs)):
                 if prob is None or prob < conf_threshold:
                     continue
                 x1 = max(0, int(box[0] * inv_scale))
@@ -152,10 +158,20 @@ class FaceMatcher:
                 valid_boxes.append((fx1, fy1, fx2, fy2))
                 valid_scores.append(float(prob))
 
+                if return_landmarks and raw_landmarks is not None and len(raw_landmarks) > idx:
+                    lm = raw_landmarks[idx]
+                    if lm is not None:
+                        scaled_lm = (lm * inv_scale).astype(int).tolist()
+                        valid_landmarks.append(scaled_lm)
+                    else:
+                        valid_landmarks.append([])
+
+            if return_landmarks:
+                return valid_boxes, valid_scores, valid_landmarks
             return valid_boxes, valid_scores
         except Exception as e:
             logger.debug(f"Error in detect_all_faces: {e}")
-            return [], []
+            return ([], [], []) if return_landmarks else ([], [])
 
     def extract_embeddings_batch(self, face_crops: List[np.ndarray]) -> Optional[np.ndarray]:
         """

@@ -18,6 +18,7 @@ except ImportError:
 
 from detector import PersonDetector
 from face_matcher import FaceMatcher
+from anti_spoof import AntiSpoofDetector
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,6 +33,17 @@ BACKEND_EMBEDDINGS_URL = os.getenv("BACKEND_ENROLLMENTS_URL", "http://localhost:
 CAMERA_SOURCE = os.getenv("CAMERA_SOURCE", "0")
 SIMILARITY_THRESHOLD = float(os.getenv("MATCH_CONFIDENCE_THRESHOLD", "0.50"))
 SHOW_DISPLAY = os.getenv("SHOW_DISPLAY_WINDOW", "true").lower() == "true"
+
+# Anti-Spoofing & Liveness Configuration
+ENABLE_LIVENESS = os.getenv("ENABLE_LIVENESS_DETECTION", "true").lower() == "true"
+LIVENESS_THRESHOLD = float(os.getenv("LIVENESS_CONFIDENCE_THRESHOLD", "0.55"))
+LIVENESS_FRAMES = int(os.getenv("LIVENESS_OBSERVATION_FRAMES", "5"))
+
+anti_spoof_engine = AntiSpoofDetector(
+    liveness_threshold=LIVENESS_THRESHOLD,
+    min_observation_frames=LIVENESS_FRAMES
+)
+logger.info(f"Liveness Detection: {'ACTIVE' if ENABLE_LIVENESS else 'DISABLED'} (Threshold: {LIVENESS_THRESHOLD}, Window: {LIVENESS_FRAMES} frames)")
 
 http_session = requests.Session()
 
@@ -225,7 +237,7 @@ class ClassroomFaceTracker:
         cB = ((boxB[0] + boxB[2]) / 2.0, (boxB[1] + boxB[3]) / 2.0)
         return ((cA[0] - cB[0])**2 + (cA[1] - cB[1])**2)**0.5
 
-    def update(self, detected_boxes: List[Tuple[int, int, int, int]], frame: np.ndarray, matcher: FaceMatcher):
+    def update(self, detected_boxes: List[Tuple[int, int, int, int]], frame: np.ndarray, matcher: FaceMatcher, detected_landmarks: Optional[List[Any]] = None):
         now = time.time()
         with self.lock:
             # Match detected boxes with existing active tracks
@@ -268,33 +280,94 @@ class ClassroomFaceTracker:
                 self.tracks[track_id]["bbox"] = smooth_box
                 self.tracks[track_id]["last_seen"] = now
 
+                if detected_landmarks and det_idx < len(detected_landmarks):
+                    lm = detected_landmarks[det_idx]
+                    if lm:
+                        self.tracks[track_id]["landmarks_history"].append(lm)
+                        if len(self.tracks[track_id]["landmarks_history"]) > 12:
+                            self.tracks[track_id]["landmarks_history"].pop(0)
+
             # Create new tracks for unmatched detections
             for det_idx in unmatched_detections:
                 track_id = self.next_track_id
                 self.next_track_id += 1
+                init_lms = [detected_landmarks[det_idx]] if (detected_landmarks and det_idx < len(detected_landmarks) and detected_landmarks[det_idx]) else []
                 self.tracks[track_id] = {
                     "track_id": track_id,
                     "bbox": detected_boxes[det_idx],
                     "matched": False,
+                    "dispatched": False,
                     "student_id": None,
                     "student_name": None,
                     "confidence": 0.0,
                     "match_type": "Face",
                     "last_seen": now,
                     "last_embed_time": 0.0,
-                    "embed_attempts": 0
+                    "embed_attempts": 0,
+                    "crops_history": [],
+                    "landmarks_history": init_lms,
+                    "frames_tracked": 0,
+                    "liveness_score": 0.0,
+                    "is_live": False,
+                    "is_spoof": False,
+                    "spoof_reason": ""
                 }
 
-            # Gather tracks that require embedding extraction (unconfirmed tracks)
+            # Update crops, temporal dynamics & liveness evaluation across all active tracks
+            h, w = frame.shape[:2]
+            for track_id, tr in self.tracks.items():
+                bx1, by1, bx2, by2 = tr["bbox"]
+                crop = frame[max(0, by1):min(h, by2), max(0, bx1):min(w, bx2)]
+                if crop.size > 0 and crop.shape[0] >= 18 and crop.shape[1] >= 18:
+                    tr["crops_history"].append(crop.copy())
+                    if len(tr["crops_history"]) > 12:
+                        tr["crops_history"].pop(0)
+                    tr["frames_tracked"] += 1
+
+                    if ENABLE_LIVENESS:
+                        liveness_res = anti_spoof_engine.evaluate_track(
+                            crop,
+                            tr["crops_history"],
+                            tr["landmarks_history"],
+                            frames_tracked=tr["frames_tracked"]
+                        )
+                        tr["liveness_score"] = liveness_res["liveness_score"]
+                        tr["is_live"] = liveness_res["is_live"]
+                        tr["is_spoof"] = liveness_res["is_spoof"]
+                        tr["spoof_reason"] = liveness_res["reason"]
+                    else:
+                        tr["liveness_score"] = 1.0
+                        tr["is_live"] = True
+                        tr["is_spoof"] = False
+                        tr["spoof_reason"] = "Liveness Disabled"
+
+                    # If an already recognized candidate student now achieved confirmed live status:
+                    if tr.get("student_id") and tr.get("is_live") and not tr.get("is_spoof") and not tr.get("dispatched", False):
+                        tr["matched"] = True
+                        tr["dispatched"] = True
+                        s_name = tr["student_name"]
+                        s_id = tr["student_id"]
+                        logger.info(
+                            f"🎯 Confirmed LIVE Attendance for {s_name} ({s_id}) "
+                            f"[Match: {tr['confidence']:.3f}, Liveness: {tr['liveness_score']:.2f}]"
+                        )
+                        photo_b64 = None
+                        try:
+                            thumb = cv2.resize(crop, (160, 160))
+                            _, buf = cv2.imencode('.jpg', thumb, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
+                            photo_b64 = "data:image/jpeg;base64," + base64.b64encode(buf).decode('utf-8')
+                        except Exception:
+                            pass
+                        queue_student_dispatch(s_id, s_name, tr["confidence"], tr["match_type"], photo_b64)
+
+            # Gather tracks that require embedding extraction (unconfirmed faces)
             tracks_to_embed = []
             crops_to_embed = []
-            h, w = frame.shape[:2]
 
             for track_id, tr in self.tracks.items():
-                if not tr["matched"]:
-                    # Intelligent pacing: first 4 attempts every 0.20s, then 1.0s, then 2.5s
+                if not tr.get("student_id"):
                     attempts = tr.get("embed_attempts", 0)
-                    interval = 0.20 if attempts < 4 else (1.0 if attempts < 10 else 2.5)
+                    interval = 0.04 if attempts < 5 else 0.15
                     if (now - tr["last_embed_time"]) >= interval:
                         bx1, by1, bx2, by2 = tr["bbox"]
                         crop = frame[max(0, by1):min(h, by2), max(0, bx1):min(w, bx2)]
@@ -312,24 +385,34 @@ class ClassroomFaceTracker:
                     for track_id, (s_id, s_name, confidence, m_type), crop in zip(tracks_to_embed, match_results, crops_to_embed):
                         tr = self.tracks[track_id]
                         if s_id:
-                            tr["matched"] = True
                             tr["student_id"] = s_id
                             tr["student_name"] = s_name
                             tr["confidence"] = confidence
                             tr["match_type"] = m_type
-                            logger.info(f"🎯 Recognized Student: {s_name} ({s_id}) [Score: {confidence:.3f}]")
+                            tr["matched"] = True
 
-                            # Generate thumbnail photo for dashboard
-                            photo_b64 = None
-                            try:
-                                thumb = cv2.resize(crop, (160, 160))
-                                _, buf = cv2.imencode('.jpg', thumb, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
-                                photo_b64 = "data:image/jpeg;base64," + base64.b64encode(buf).decode('utf-8')
-                            except Exception:
-                                pass
-
-                            # Queue asynchronous non-blocking webhook dispatch
-                            queue_student_dispatch(s_id, s_name, confidence, m_type, photo_b64)
+                            # IMMEDIATE ATTENDANCE DISPATCH IF LIVE
+                            if tr.get("is_spoof"):
+                                tr["matched"] = False
+                                logger.warning(
+                                    f"🚫 [AntiSpoof REJECTED] Enrolled student {s_name} ({s_id}) photo shown on phone/printout! "
+                                    f"Attendance BLOCKED. ({tr['spoof_reason']})"
+                                )
+                            elif tr.get("is_live"):
+                                if not tr.get("dispatched", False):
+                                    tr["dispatched"] = True
+                                    logger.info(
+                                        f"🎯 Recognized LIVE Student: {s_name} ({s_id}) "
+                                        f"[Match: {confidence:.3f}, Liveness: {tr['liveness_score']:.2f}]"
+                                    )
+                                    photo_b64 = None
+                                    try:
+                                        thumb = cv2.resize(crop, (160, 160))
+                                        _, buf = cv2.imencode('.jpg', thumb, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
+                                        photo_b64 = "data:image/jpeg;base64," + base64.b64encode(buf).decode('utf-8')
+                                    except Exception:
+                                        pass
+                                    queue_student_dispatch(s_id, s_name, confidence, m_type, photo_b64)
                         else:
                             tr["confidence"] = max(tr["confidence"], confidence)
 
@@ -344,18 +427,37 @@ class ClassroomFaceTracker:
         with self.lock:
             dets = []
             for tr in self.tracks.values():
-                is_matched = tr["matched"]
-                if is_matched:
-                    label = f"{tr['student_name']} ({tr['student_id']})"
+                is_matched = tr.get("matched", False)
+                is_spoof = tr.get("is_spoof", False)
+                is_live = tr.get("is_live", False)
+                s_name = tr.get("student_name")
+                s_id = tr.get("student_id")
+                conf = tr.get("confidence", 0.0)
+                liveness_score = tr.get("liveness_score", 0.0)
+                spoof_reason = tr.get("spoof_reason", "")
+
+                if is_spoof:
+                    label = f"SPOOF: {spoof_reason}"
+                    status_type = "Spoof"
+                elif s_name:
+                    label = f"{s_name} ({s_id})"
+                    status_type = "Verified"
                 else:
-                    conf = tr.get("confidence", 0.0)
                     label = f"Scanning ({conf*100:.0f}%)" if conf > 0.30 else "Detecting Face"
+                    status_type = "Scanning"
 
                 dets.append({
                     "bbox": tr["bbox"],
                     "matched": is_matched,
+                    "is_live": is_live,
+                    "is_spoof": is_spoof,
+                    "liveness_score": liveness_score,
+                    "spoof_reason": spoof_reason,
+                    "student_name": s_name,
+                    "student_id": s_id,
                     "label": label,
-                    "confidence": tr["confidence"],
+                    "status_type": status_type,
+                    "confidence": conf,
                     "type": tr.get("match_type", "Face"),
                     "track_id": tr["track_id"]
                 })
@@ -394,11 +496,11 @@ class AIScannerWorker:
                 time.sleep(0.01)
                 continue
 
-            # 1. Single-pass high-speed multi-face detection (All faces found in ~20ms)
-            face_boxes, face_scores = self.matcher.detect_all_faces(frame, conf_threshold=0.45)
+            # 1. Single-pass high-speed multi-face & landmark detection (~20ms)
+            face_boxes, face_scores, face_landmarks = self.matcher.detect_all_faces(frame, conf_threshold=0.45, return_landmarks=True)
 
-            # 2. Update classroom spatial identity tracker (Batched FaceNet for new faces, 0ms for confirmed)
-            self.tracker.update(face_boxes, frame, self.matcher)
+            # 2. Update classroom spatial identity tracker with liveness & anti-spoof checks
+            self.tracker.update(face_boxes, frame, self.matcher, face_landmarks)
 
             # Metric updates
             metric_count += 1
@@ -506,6 +608,7 @@ def main():
     print("   • Classroom Capacity: Up to 65+ Students Simultaneous")
     print(f"   • Matching Threshold: {SIMILARITY_THRESHOLD}")
     print("   • AI Tracking: Zero-Overhead Spatial Centroid & IoU Tracker")
+    print(f"   • Anti-Spoofing & Liveness: {'ACTIVE' if ENABLE_LIVENESS else 'DISABLED'} (Screen & Photo Rejection)")
     print("   • Video Stream: Continuous 30 FPS Non-blocking")
     print("=" * 65 + "\n")
 
@@ -556,26 +659,41 @@ def main():
             # Top Header Bar (HUD)
             cv2.rectangle(display_frame, (0, 0), (w, 36), (15, 17, 23), -1)
             ai_fps_str = f"{ai_worker.fps:.1f}" if ai_worker.fps > 0 else "Active"
-            status_line = f"LIVE AI FEED | Cam {CAMERA_SOURCE} | Scan: {ai_fps_str} scans/s | Faces: {total_faces} | Enrolled: {len(matcher.enrolled_students)}"
+            spoof_count = sum(1 for d in active_detections if d.get("is_spoof"))
+            status_line = f"LIVE AI FEED | Cam {CAMERA_SOURCE} | Scan: {ai_fps_str} scans/s | Faces: {total_faces} | Enrolled: {len(matcher.enrolled_students)} | Anti-Spoof: {'ACTIVE' if ENABLE_LIVENESS else 'OFF'}"
+            if spoof_count > 0:
+                status_line += f" | ⚠️ SPOOF ATTEMPTS: {spoof_count}"
+            hud_color = (0, 100, 255) if spoof_count > 0 else (0, 240, 120)
             cv2.putText(display_frame, status_line, (15, 24),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.48, (0, 240, 120), 2)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, hud_color, 2)
 
             # Draw Detections Overlay
             for det in active_detections:
                 bx1, by1, bx2, by2 = det["bbox"]
-                is_match = det["matched"]
-                if is_match:
-                    tag = f"✓ {det['label']} [{(det['confidence']*100):.0f}%]"
-                    color = (0, 230, 110)  # Emerald green for confirmed attendance
+                is_match = det.get("matched", False)
+                is_spoof = det.get("is_spoof", False)
+                is_live = det.get("is_live", False)
+                status_type = det.get("status_type", "")
+                conf = det.get("confidence", 0.0)
+
+                if is_spoof:
+                    tag = f"❌ SPOOF: {det.get('spoof_reason', 'Photo/Screen')}"
+                    color = (0, 0, 230)  # Bright Red for spoof rejection
+                    text_color = (255, 255, 255)
+                elif det.get("student_name"):
+                    tag = f"✓ {det['label']} [{(conf*100):.0f}%]"
+                    color = (0, 230, 110)  # Emerald Green for recognized student
+                    text_color = (0, 0, 0)
                 else:
                     tag = f"{det['label']}"
-                    color = (0, 185, 255)  # Cyan/Amber for active scanning
+                    color = (200, 180, 0)  # Cyan for general detection
+                    text_color = (0, 0, 0)
 
                 cv2.rectangle(display_frame, (bx1, by1), (bx2, by2), color, 2)
-                tw = len(tag) * 8 + 10
+                tw = max(100, len(tag) * 8 + 12)
                 cv2.rectangle(display_frame, (bx1, max(0, by1 - 24)), (bx1 + tw, by1), color, -1)
                 cv2.putText(display_frame, tag, (bx1 + 5, max(16, by1 - 6)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 0, 0), 2)
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.42, text_color, 2)
 
             # Push live annotated frame to dashboard broadcaster (non-blocking)
             broadcaster.update_frame(display_frame)
