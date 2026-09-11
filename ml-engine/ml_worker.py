@@ -545,7 +545,6 @@ def main():
             if not ret or frame is None:
                 time.sleep(0.01)
                 continue
-
             display_frame = frame.copy()
             h, w = display_frame.shape[:2]
 

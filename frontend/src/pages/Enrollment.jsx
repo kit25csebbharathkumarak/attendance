@@ -35,6 +35,18 @@ export const Enrollment = () => {
     }
   };
 
+  const handleDeleteStudent = async (sId) => {
+    try {
+      const res = await fetch(`/api/students/${sId}`, { method: 'DELETE' });
+      if (res.ok) {
+        setMessage({ type: 'success', text: `Student ${sId} deleted successfully.` });
+        fetchEnrolled();
+      }
+    } catch (e) {
+      console.error('Failed to delete student:', e);
+    }
+  };
+
   const checkWorker = async () => {
     try {
       const res = await fetch('/api/worker/status');

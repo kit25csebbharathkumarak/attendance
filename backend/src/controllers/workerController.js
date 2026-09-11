@@ -74,8 +74,13 @@ const startWorker = (req, res) => {
     console.log(`[Worker Manager] Spawning Python worker in: ${cwd} (Camera: ${activeCameraSource})`);
     workerLogs = [`[System] Starting Python ML Worker on camera [${activeCameraSource}] at ${new Date().toLocaleTimeString()}...`];
 
-    // Spawn python process inside ml-engine working directory with specified CAMERA_SOURCE
-    workerProcess = spawn('python', ['ml_worker.py'], {
+    // Use 'py -3.11' on Windows to force Python 3.11 (tensorflow/torch/deepface require 3.11 or lower).
+    // Python 3.14 (the system default) does NOT support these ML libraries.
+    // If py launcher is not available, falls back to 'python3.11' or 'python'.
+    const pythonCmd = process.platform === 'win32' ? 'py' : 'python3.11';
+    const pythonArgs = process.platform === 'win32' ? ['-3.11', 'ml_worker.py'] : ['ml_worker.py'];
+
+    workerProcess = spawn(pythonCmd, pythonArgs, {
       cwd,
       env: {
         ...process.env,

@@ -20,7 +20,9 @@ const extractRealEmbeddingFromImage = (base64Data) => {
       fs.writeFileSync(tempFile, buffer);
 
       const scriptPath = path.resolve(__dirname, '../../../ml-engine/extract_embedding.py');
-      const pythonCmd = `python "${scriptPath}" "${tempFile}"`;
+      const pythonCmd = process.platform === 'win32'
+        ? `py -3.11 "${scriptPath}" "${tempFile}"`
+        : `python3.11 "${scriptPath}" "${tempFile}"`;
 
       exec(pythonCmd, { timeout: 30000 }, (error, stdout, stderr) => {
         // Clean up temp file

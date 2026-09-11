@@ -1,14 +1,20 @@
+# ⚠️ REQUIRES Python 3.11 (NOT 3.12+ or 3.14+)
+# Install with: py -3.11 -m pip install -r requirements.txt
+
 # Computer Vision & Deep Learning
 ultralytics>=8.1.0
-deepface>=0.0.90
 opencv-python>=4.8.0
 numpy>=1.24.0
 scipy>=1.11.0
+
+# Face Recognition (FaceNet + MTCNN via PyTorch)
+torch>=2.0.0
+torchvision>=0.15.0
+facenet-pytorch>=2.5.3
 
 # HTTP & Environment
 requests>=2.31.0
 python-dotenv>=1.0.0
 
-# DeepFace Backends (FaceNet / TF)
-tf-keras>=2.15.0
+# Image Processing
 pillow>=10.0.0
