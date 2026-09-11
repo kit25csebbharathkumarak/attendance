@@ -381,11 +381,17 @@ export const Dashboard = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h2 className="text-2xl font-black text-red-950 tracking-tight">
-            Attendance Dashboard
-          </h2>
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <h2 className="text-2xl font-black text-red-950 tracking-tight">
+              Attendance Dashboard
+            </h2>
+            <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Anti-Spoofing Active</span>
+            </div>
+          </div>
           <p className="text-xs text-red-900/60 mt-0.5">
-            Automatic walk-through attendance tracking
+            Automatic walk-through attendance tracking with live student verification
           </p>
         </div>
 

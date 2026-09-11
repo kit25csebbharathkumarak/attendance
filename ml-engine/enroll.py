@@ -5,6 +5,7 @@ import requests
 import numpy as np
 from PIL import Image
 from face_matcher import FaceMatcher
+from anti_spoof import AntiSpoofDetector
 
 BACKEND_ENROLL_URL = "http://localhost:5000/api/enroll"
 
@@ -15,12 +16,13 @@ def enroll_from_webcam(student_id: str, name: str, department: str = "Computer S
     print("=" * 60)
     print("Instructions:")
     print("1. Look at the camera.")
-    print("2. The MTCNN neural network will track your face with a green box.")
+    print("2. The MTCNN neural network & Anti-Spoof engine will track your face.")
     print("3. Press [SPACE] to capture and extract real 512-d FaceNet embeddings.")
     print("4. Press [ESC] or [Q] to quit.")
     print("=" * 60 + "\n")
 
     matcher = FaceMatcher()
+    anti_spoof = AntiSpoofDetector(liveness_threshold=0.55)
     cap = cv2.VideoCapture(0)
 
     if not cap.isOpened():
@@ -44,16 +46,32 @@ def enroll_from_webcam(student_id: str, name: str, department: str = "Computer S
             boxes, probs = matcher.mtcnn.detect(pil_frame)
 
             face_detected = False
+            is_live_student = False
+
             if boxes is not None and len(boxes) > 0:
                 face_detected = True
                 bx = boxes[0].astype(int)
                 x1, y1, x2, y2 = max(0, bx[0]), max(0, bx[1]), min(w, bx[2]), min(h, bx[3])
 
-                cv2.rectangle(display, (x1, y1), (x2, y2), (0, 255, 120), 2)
-                tag = f"Face Detected ({(probs[0]*100):.0f}%) - Press SPACE"
-                cv2.rectangle(display, (x1, max(0, y1 - 25)), (x1 + len(tag) * 9, y1), (0, 255, 120), -1)
-                cv2.putText(display, tag, (x1 + 4, max(16, y1 - 6)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 2)
+                crop = frame[y1:y2, x1:x2]
+                if crop.size > 0 and crop.shape[0] >= 20 and crop.shape[1] >= 20:
+                    liveness_score, details = anti_spoof.evaluate_crop(crop)
+                    is_live_student = (liveness_score >= 0.50) and details.get("in_locus", True)
+                else:
+                    liveness_score = 0.0
+
+                if is_live_student:
+                    cv2.rectangle(display, (x1, y1), (x2, y2), (0, 255, 120), 2)
+                    tag = f"✓ Live Student ({(liveness_score*100):.0f}%) - Press SPACE"
+                    cv2.rectangle(display, (x1, max(0, y1 - 25)), (x1 + len(tag) * 9, y1), (0, 255, 120), -1)
+                    cv2.putText(display, tag, (x1 + 4, max(16, y1 - 6)),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 2)
+                else:
+                    cv2.rectangle(display, (x1, y1), (x2, y2), (0, 0, 240), 2)
+                    tag = "❌ SPOOF: Photo / Screen detected! Live student required."
+                    cv2.rectangle(display, (x1, max(0, y1 - 25)), (x1 + len(tag) * 9, y1), (0, 0, 240), -1)
+                    cv2.putText(display, tag, (x1 + 4, max(16, y1 - 6)),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 2)
             else:
                 # Alignment guide
                 cx, cy = w // 2, h // 2
@@ -70,6 +88,10 @@ def enroll_from_webcam(student_id: str, name: str, department: str = "Computer S
 
             key = cv2.waitKey(1) & 0xFF
             if key == ord(' ') and face_detected:
+                if not is_live_student:
+                    print("\n[!] ENROLLMENT REJECTED: A real living student must be physically present! Photo or screen detected.")
+                    continue
+
                 print("\n[AI] Running InceptionResnetV1 deep neural network...")
                 captured_embedding = matcher.extract_embedding(frame)
                 if captured_embedding is not None:

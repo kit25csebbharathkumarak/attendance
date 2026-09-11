@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 from detector import PersonDetector
 from face_matcher import FaceMatcher
+from anti_spoof import AntiSpoofDetector
 from utils.vision_helpers import crop_bbox, draw_hud
 
 load_dotenv()
@@ -34,6 +35,7 @@ class MainAttendanceWorker:
         logger.info("Initializing Modular Attendance Worker pipeline...")
         self.detector = PersonDetector(model_weight="yolov8n.pt", conf_threshold=0.45)
         self.matcher = FaceMatcher(model_name="Facenet512", similarity_threshold=0.65)
+        self.anti_spoof = AntiSpoofDetector(liveness_threshold=0.55)
         self.matcher.load_enrolled_students(backend_url=BACKEND_ENROLLMENTS_URL)
 
         cam_idx = int(CAMERA_SOURCE) if CAMERA_SOURCE.isdigit() else CAMERA_SOURCE
@@ -98,20 +100,32 @@ class MainAttendanceWorker:
                     for p in person_detections:
                         bbox = p["bbox"]
                         crop = crop_bbox(frame, bbox, padding_pct=0.05)
-
                         if crop is not None:
-                            # 2. Extract facial feature & match against 65 students
+                            # 2. Extract facial feature & match against enrolled students
                             matched_id, confidence, match_type = self.matcher.match_face(crop)
 
                             if matched_id:
-                                logger.info(f"✨ Match confirmed: {matched_id} ({confidence:.2f})")
-                                self.notify_backend(matched_id, confidence, match_type)
-                                active_detections.append({
-                                    "bbox": bbox,
-                                    "student_id": matched_id,
-                                    "confidence": confidence,
-                                    "label": f"Student {matched_id}"
-                                })
+                                # 3. Anti-Spoofing & Liveness check
+                                liveness_score, l_details = self.anti_spoof.evaluate_crop(crop)
+                                is_live = (liveness_score >= 0.50) and l_details.get("in_locus", True)
+
+                                if is_live:
+                                    logger.info(f"✨ LIVE Match confirmed: {matched_id} ({confidence:.2f}, Liveness: {liveness_score:.2f})")
+                                    self.notify_backend(matched_id, confidence, match_type)
+                                    active_detections.append({
+                                        "bbox": bbox,
+                                        "student_id": matched_id,
+                                        "confidence": confidence,
+                                        "label": f"✓ Student {matched_id} ({liveness_score*100:.0f}%)"
+                                    })
+                                else:
+                                    logger.warning(f"🚫 [AntiSpoof REJECTED] Spoof photo/screen detected for student {matched_id}! Attendance BLOCKED.")
+                                    active_detections.append({
+                                        "bbox": bbox,
+                                        "student_id": None,
+                                        "confidence": confidence,
+                                        "label": f"❌ SPOOF DETECTED ({matched_id})"
+                                    })
                             else:
                                 active_detections.append({
                                     "bbox": bbox,
