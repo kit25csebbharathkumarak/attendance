@@ -58,8 +58,8 @@ http_session = requests.Session()
 
 # Non-blocking background worker pool for webhooks
 webhook_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="WebhookDispatch")
-# Dedicated non-blocking worker pool for FaceNet feature extraction
-embedding_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="FaceEmbed")
+# Dedicated non-blocking worker pool for FaceNet feature extraction (tuned to 2 workers to eliminate CPU oversubscription)
+embedding_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="FaceEmbed")
 recent_matches_cache: Dict[str, float] = {}
 recent_matches_lock = threading.Lock()
 DISPATCH_COOLDOWN_SECONDS = 45.0  # Avoid flooding backend for the same student within 45s
@@ -316,6 +316,7 @@ class ClassroomFaceTracker:
                     "confidence": 0.0,
                     "match_type": "Face",
                     "last_seen": now,
+                    "detect_start_time": now,
                     "last_embed_time": 0.0,
                     "embed_attempts": 0,
                     "crops_history": [],
@@ -343,7 +344,9 @@ class ClassroomFaceTracker:
                             crop,
                             tr["crops_history"],
                             tr["landmarks_history"],
-                            frames_tracked=tr["frames_tracked"]
+                            frames_tracked=tr["frames_tracked"],
+                            full_frame=frame,
+                            face_bbox=tr["bbox"]
                         )
                         tr["liveness_score"] = liveness_res["liveness_score"]
                         tr["is_live"] = liveness_res["is_live"]
@@ -367,9 +370,10 @@ class ClassroomFaceTracker:
                         tr["dispatched"] = True
                         s_name = tr["student_name"]
                         s_id = tr["student_id"]
+                        e2e_latency = (time.time() - tr.get("detect_start_time", now)) * 1000.0
                         logger.info(
                             f"🎯 Confirmed LIVE Attendance for {s_name} ({s_id}) "
-                            f"[Match: {tr['confidence']:.3f}, Liveness: {tr['liveness_score']:.2f}]"
+                            f"[Match: {tr['confidence']:.3f}, Liveness: {tr['liveness_score']:.2f}, E2E Latency: {e2e_latency:.1f}ms]"
                         )
                         photo_b64 = None
                         try:
@@ -431,9 +435,10 @@ class ClassroomFaceTracker:
                                 ):
                                     tr["matched"] = True
                                     tr["dispatched"] = True
+                                    e2e_latency = (time.time() - tr.get("detect_start_time", time.time())) * 1000.0
                                     logger.info(
                                         f"🎯 Recognized LIVE Student: {s_name} ({s_id}) "
-                                        f"[Match: {confidence:.3f}, Liveness: {tr['liveness_score']:.2f}]"
+                                        f"[Match: {confidence:.3f}, Liveness: {tr['liveness_score']:.2f}, E2E Latency: {e2e_latency:.1f}ms]"
                                     )
                                     photo_b64 = None
                                     try:
@@ -531,11 +536,11 @@ class AIScannerWorker:
                 time.sleep(0.01)
                 continue
 
-            # 1. Single-pass ultra-fast multi-face detection (35ms, without landmark regression overhead)
-            face_boxes, face_scores = self.matcher.detect_all_faces(frame, conf_threshold=0.35, return_landmarks=False)
+            # 1. Single-pass ultra-fast multi-face detection with 5-point facial keypoints
+            face_boxes, face_scores, face_landmarks = self.matcher.detect_all_faces(frame, conf_threshold=0.35, return_landmarks=True)
 
-            # 2. Update classroom spatial identity tracker with liveness & anti-spoof checks
-            self.tracker.update(face_boxes, frame, self.matcher)
+            # 2. Update classroom spatial identity tracker with liveness, landmark dynamics & anti-spoof checks
+            self.tracker.update(face_boxes, frame, self.matcher, detected_landmarks=face_landmarks)
 
             # Metric updates
             metric_count += 1

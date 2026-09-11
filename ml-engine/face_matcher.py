@@ -25,9 +25,9 @@ class FaceMatcher:
         self.similarity_threshold = similarity_threshold
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # Optimize CPU threads for parallel inference on host (up to 6 threads)
+        # Optimize CPU threads for parallel inference on host (balanced at 4 threads to prevent core contention)
         if self.device.type == "cpu":
-            optimal_threads = min(6, os.cpu_count() or 4)
+            optimal_threads = min(4, os.cpu_count() or 4)
             torch.set_num_threads(optimal_threads)
             try:
                 torch.set_flush_denormal(True)

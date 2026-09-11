@@ -26,16 +26,19 @@ FRAME_THROTTLE_SECONDS = float(os.getenv("FRAME_THROTTLE_SECONDS", "3.0"))
 SHOW_DISPLAY = os.getenv("SHOW_DISPLAY_WINDOW", "true").lower() == "true"
 
 
+# NOTE: main_worker.py is an older legacy/prototype single-camera polling worker.
+# The primary, active production multi-student streaming worker is ml_worker.py.
+
 class MainAttendanceWorker:
     """
-    Modular master pipeline uniting YOLOv8 PersonDetector and DeepFace FaceMatcher.
+    Legacy modular master pipeline uniting YOLOv8 PersonDetector and FaceNet FaceMatcher.
     """
 
     def __init__(self):
-        logger.info("Initializing Modular Attendance Worker pipeline...")
+        logger.info("Initializing Legacy Attendance Worker pipeline...")
         self.detector = PersonDetector(model_weight="yolov8n.pt", conf_threshold=0.45)
-        self.matcher = FaceMatcher(model_name="Facenet512", similarity_threshold=0.65)
-        self.anti_spoof = AntiSpoofDetector(liveness_threshold=0.55)
+        self.matcher = FaceMatcher(similarity_threshold=0.50)
+        self.anti_spoof = AntiSpoofDetector(liveness_threshold=0.45)
         self.matcher.load_enrolled_students(backend_url=BACKEND_ENROLLMENTS_URL)
 
         cam_idx = int(CAMERA_SOURCE) if CAMERA_SOURCE.isdigit() else CAMERA_SOURCE
@@ -102,29 +105,38 @@ class MainAttendanceWorker:
                         crop = crop_bbox(frame, bbox, padding_pct=0.05)
                         if crop is not None:
                             # 2. Extract facial feature & match against enrolled students
-                            matched_id, confidence, match_type = self.matcher.match_face(crop)
+                            matched_id, student_name, confidence, match_type, face_crop, face_bbox = self.matcher.match_face(crop)
 
                             if matched_id:
                                 # 3. Anti-Spoofing & Liveness check
-                                liveness_score, l_details = self.anti_spoof.evaluate_crop(crop)
-                                is_live = (liveness_score >= 0.50) and l_details.get("in_locus", True)
+                                liveness_target = face_crop if (face_crop is not None and face_crop.size > 0) else crop
+                                l_res = self.anti_spoof.evaluate_track(
+                                    liveness_target,
+                                    [liveness_target],
+                                    frames_tracked=2,
+                                    full_frame=frame,
+                                    face_bbox=face_bbox
+                                )
+                                is_live = l_res["is_live"] and not l_res["is_spoof"]
+                                liveness_score = l_res["liveness_score"]
 
                                 if is_live:
-                                    logger.info(f"✨ LIVE Match confirmed: {matched_id} ({confidence:.2f}, Liveness: {liveness_score:.2f})")
+                                    logger.info(f"✨ LIVE Match confirmed: {student_name} ({matched_id}) ({confidence:.2f}, Liveness: {liveness_score:.2f})")
                                     self.notify_backend(matched_id, confidence, match_type)
                                     active_detections.append({
                                         "bbox": bbox,
                                         "student_id": matched_id,
                                         "confidence": confidence,
-                                        "label": f"✓ Student {matched_id} ({liveness_score*100:.0f}%)"
+                                        "label": f"✓ {student_name} ({confidence*100:.0f}%)"
                                     })
                                 else:
-                                    logger.warning(f"🚫 [AntiSpoof REJECTED] Spoof photo/screen detected for student {matched_id}! Attendance BLOCKED.")
+                                    reason = l_res.get("reason", "Spoof Attack")
+                                    logger.warning(f"🚫 [AntiSpoof REJECTED] Spoof photo/screen detected for student {matched_id}! Attendance BLOCKED. ({reason})")
                                     active_detections.append({
                                         "bbox": bbox,
                                         "student_id": None,
                                         "confidence": confidence,
-                                        "label": f"❌ SPOOF DETECTED ({matched_id})"
+                                        "label": f"❌ SPOOF: {reason}"
                                     })
                             else:
                                 active_detections.append({

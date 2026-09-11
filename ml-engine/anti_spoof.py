@@ -357,47 +357,217 @@ class AntiSpoofDetector:
 
         return float(np.clip(passive_score, 0.0, 1.0)), details
 
+    def check_phone_bezel(
+        self,
+        full_frame: Optional[np.ndarray],
+        face_bbox: Optional[Tuple[int, int, int, int]],
+        padding_pct: float = 0.40
+    ) -> Tuple[float, Dict[str, Any]]:
+        """
+        Detects rectangular high-contrast straight edges/bezels in the context
+        region around the face bounding box (characteristic of smartphones/tablets).
+        """
+        if full_frame is None or full_frame.size == 0 or not face_bbox:
+            return 1.0, {"is_bezel": False, "bezel_lines": 0}
+
+        try:
+            h, w = full_frame.shape[:2]
+            bx1, by1, bx2, by2 = face_bbox
+            bw = bx2 - bx1
+            bh = by2 - by1
+
+            px = int(bw * padding_pct)
+            py = int(bh * padding_pct)
+            x1 = max(0, bx1 - px)
+            y1 = max(0, by1 - py)
+            x2 = min(w, bx2 + px)
+            y2 = min(h, by2 + py)
+
+            context = full_frame[y1:y2, x1:x2]
+            ch, cw = context.shape[:2]
+            if ch < 40 or cw < 40:
+                return 1.0, {"is_bezel": False, "bezel_lines": 0}
+
+            gray = cv2.cvtColor(context, cv2.COLOR_BGR2GRAY)
+            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+            edges = cv2.Canny(blurred, 50, 150)
+
+            # Mask out interior face so internal facial contours/hair are excluded
+            face_in_ctx_x1 = max(0, bx1 - x1)
+            face_in_ctx_y1 = max(0, by1 - y1)
+            face_in_ctx_x2 = min(cw, bx2 - x1)
+            face_in_ctx_y2 = min(ch, by2 - y1)
+
+            border_edges = edges.copy()
+            border_edges[face_in_ctx_y1:face_in_ctx_y2, face_in_ctx_x1:face_in_ctx_x2] = 0
+
+            min_len = int(min(ch, cw) * 0.30)
+            lines = cv2.HoughLinesP(border_edges, 1, np.pi / 180, threshold=30, minLineLength=min_len, maxLineGap=12)
+
+            vertical_lines = 0
+            horizontal_lines = 0
+            if lines is not None:
+                for line in lines:
+                    pts = line[0] if hasattr(line[0], '__len__') else line
+                    lx1, ly1, lx2, ly2 = int(pts[0]), int(pts[1]), int(pts[2]), int(pts[3])
+                    angle = np.abs(np.arctan2(ly2 - ly1, lx2 - lx1) * 180.0 / np.pi)
+                    if (angle > 78.0 and angle < 102.0) or (angle > 258.0 and angle < 282.0):
+                        vertical_lines += 1
+                    elif angle < 12.0 or angle > 168.0:
+                        horizontal_lines += 1
+
+            is_bezel = (vertical_lines >= 2 and horizontal_lines >= 1) or (vertical_lines >= 3) or (horizontal_lines >= 3)
+            score = 0.10 if is_bezel else 1.0
+            return score, {
+                "is_bezel": is_bezel,
+                "bezel_vert": vertical_lines,
+                "bezel_horiz": horizontal_lines,
+                "bezel_lines": len(lines) if lines is not None else 0
+            }
+        except Exception as e:
+            logger.debug(f"Bezel detection notice: {e}")
+            return 1.0, {"is_bezel": False, "bezel_lines": 0}
+
+    def check_landmark_dynamics(
+        self,
+        landmarks_history: Optional[List[Any]]
+    ) -> Tuple[float, Dict[str, Any]]:
+        """
+        Analyzes 5-point MTCNN landmark dynamics across tracked frames:
+        1. Scale-invariant relative distances (eye-to-eye, eye-to-nose, nose-to-mouth).
+        2. Eye-aspect-ratio (EAR) proxy variation across observation window.
+        3. Rigid vs non-rigid motion check:
+           A flat photo held in hand moves as ONE rigid 2D planar unit (internal distance ratio
+           variance is near-zero < 0.0003), whereas living 3D faces exhibit natural micro-variations
+           (blinks, expressions, 3D yaw/pitch perspective shifts >= 0.0008).
+        """
+        if not landmarks_history or len(landmarks_history) < 2:
+            return 0.5, {
+                "is_rigid_landmark": False,
+                "landmark_total_var": 0.0,
+                "ear_var": 0.0,
+                "num_landmarks": len(landmarks_history) if landmarks_history else 0
+            }
+
+        try:
+            ratios = []
+            for lm in landmarks_history[-8:]:
+                if not lm or len(lm) < 5:
+                    continue
+                pts = np.array(lm, dtype=float)
+                le, re, nose, ml, mr = pts[0], pts[1], pts[2], pts[3], pts[4]
+                eye_dist = float(np.linalg.norm(re - le))
+                if eye_dist < 1.0:
+                    continue
+
+                eye_center = (le + re) / 2.0
+                mouth_center = (ml + mr) / 2.0
+
+                eye_to_nose = float(np.linalg.norm(eye_center - nose) / eye_dist)
+                nose_to_mouth = float(np.linalg.norm(nose - mouth_center) / eye_dist)
+                mouth_width = float(np.linalg.norm(mr - ml) / eye_dist)
+                ear_ratio = float(np.linalg.norm(eye_center - mouth_center) / eye_dist)
+                left_height = float(np.linalg.norm(le - ml) / eye_dist)
+                right_height = float(np.linalg.norm(re - mr) / eye_dist)
+                symmetry = float(left_height / (right_height + 1e-6))
+
+                ratios.append({
+                    "en": eye_to_nose,
+                    "nm": nose_to_mouth,
+                    "mw": mouth_width,
+                    "ear": ear_ratio,
+                    "sym": symmetry
+                })
+
+            if len(ratios) < 2:
+                return 0.5, {
+                    "is_rigid_landmark": False,
+                    "landmark_total_var": 0.0,
+                    "ear_var": 0.0,
+                    "num_landmarks": len(ratios)
+                }
+
+            var_ear = float(np.var([r["ear"] for r in ratios]))
+            var_sym = float(np.var([r["sym"] for r in ratios]))
+            var_en = float(np.var([r["en"] for r in ratios]))
+            var_mw = float(np.var([r["mw"] for r in ratios]))
+
+            total_var = float(var_ear + var_sym + var_en + var_mw)
+            # In a flat rigid photo or phone replay, all inter-landmark ratios are mathematically frozen (< 0.0003)
+            # In a live 3D face, micro-movements, blinks, and depth shifts generate variance >= 0.0008
+            is_rigid_landmark = total_var < 0.0003
+
+            if is_rigid_landmark:
+                score = 0.15
+            elif total_var >= 0.0008:
+                score = 1.0
+            else:
+                score = 0.55
+
+            return score, {
+                "is_rigid_landmark": is_rigid_landmark,
+                "landmark_total_var": round(total_var, 6),
+                "ear_var": round(var_ear, 6),
+                "num_landmarks": len(ratios)
+            }
+        except Exception as e:
+            logger.debug(f"Landmark dynamics notice: {e}")
+            return 0.5, {"is_rigid_landmark": False, "landmark_total_var": 0.0, "ear_var": 0.0}
+
     def evaluate_track(
         self,
         current_crop: np.ndarray,
         crops_history: List[np.ndarray],
         landmarks_history: Optional[List[Any]] = None,
-        frames_tracked: int = 1
+        frames_tracked: int = 1,
+        full_frame: Optional[np.ndarray] = None,
+        face_bbox: Optional[Tuple[int, int, int, int]] = None
     ) -> Dict[str, Any]:
         """
-        Real-time multi-cue evaluation combining single-frame passive features
-        with multi-frame temporal dynamics.
-        Fast, robust, and designed to prevent false rejections.
+        Real-time multi-cue evaluation combining single-frame passive features,
+        multi-frame temporal pixel dynamics, landmark geometry deformation,
+        and phone bezel context edge detection.
         """
         passive_score, details = self.evaluate_crop(current_crop)
         temp_score, temp_details = self.check_temporal_dynamics(crops_history, landmarks_history)
-        details.update(temp_details)
+        lm_score, lm_details = self.check_landmark_dynamics(landmarks_history)
+        bezel_score, bezel_details = self.check_phone_bezel(full_frame, face_bbox)
 
-        # Fuse passive optical + temporal movement
+        details.update(temp_details)
+        details.update(lm_details)
+        details.update(bezel_details)
+
+        # Fuse passive optical + landmark dynamics (heavier weight) + temporal movement
         if frames_tracked >= self.min_observation_frames:
-            fused_score = 0.60 * passive_score + 0.40 * temp_score
+            fused_score = 0.40 * passive_score + 0.35 * lm_score + 0.25 * temp_score
         else:
-            fused_score = 0.85 * passive_score + 0.15 * temp_score
+            fused_score = 0.70 * passive_score + 0.15 * lm_score + 0.15 * temp_score
 
         fused_score = float(np.clip(fused_score, 0.0, 1.0))
 
         # Precision Spoof Rejection Vetoes:
-        # 1. Screen Moiré / Digital Pixel Grid Gate
         hard_veto_reason = None
-        if details.get("is_screen_moire") or details.get("peak_prominence", 0.0) >= 92.0 or details.get("laplacian_var", 0.0) > 3500.0:
+        # 1. Phone Bezel Detected (Rectangular display edge around face)
+        if details.get("is_bezel"):
+            hard_veto_reason = "Phone Screen Bezel Detected (Rectangular Display Edge)"
+        # 2. Rigid Landmark Motion Detected (Planar photo moving in shaking hand)
+        elif lm_details.get("is_rigid_landmark") and frames_tracked >= 2:
+            hard_veto_reason = "Photo/Screen Replay Detected (Rigid 2D Landmark Motion)"
+        # 3. Screen Moiré / Digital Pixel Grid Gate
+        elif details.get("is_screen_moire") or details.get("peak_prominence", 0.0) >= 92.0 or details.get("laplacian_var", 0.0) > 3500.0:
             hard_veto_reason = "Screen Replay Detected (Digital Screen Moire)"
-        # 2. Paper Printout Gate (Reduced Chrominance + Matte Flat Texture)
+        # 4. Paper Printout Gate (Reduced Chrominance + Matte Flat Texture)
         elif details.get("is_paper_chroma") and (details.get("is_flat_texture") or details.get("cb_std", 10.0) < 2.6):
             hard_veto_reason = "Paper Printout Detected (Matte Paper / Color)"
         elif details.get("cb_std", 10.0) < 2.2:
             hard_veto_reason = "Paper Printout Detected (Grayscale / Low Chroma)"
-        # 3. Static Photo Gate: Zero biological movement across observation frames
+        # 5. Static Photo Gate: Zero biological movement across observation frames
         elif temp_details.get("is_static") and temp_details.get("num_frames", frames_tracked) >= 2:
             hard_veto_reason = "Static Photo Detected (Zero biological motion)"
-        # 4. Hand-Held 2D Moving Surface Gate (Planar motion of phone/photo)
+        # 6. Hand-Held 2D Moving Surface Gate (Planar motion of phone/photo)
         elif temp_details.get("is_rigid_planar") and temp_details.get("num_frames", frames_tracked) >= 2:
             hard_veto_reason = "Photo/Screen Replay Detected (Rigid 2D planar motion)"
-        # 5. Non-Skin Surface / Off-Color Replay
+        # 7. Non-Skin Surface / Off-Color Replay
         elif not details.get("in_locus", True):
             hard_veto_reason = "Non-Skin Surface / Off-Color Replay"
 
