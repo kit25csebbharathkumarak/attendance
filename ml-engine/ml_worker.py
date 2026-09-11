@@ -356,7 +356,13 @@ class ClassroomFaceTracker:
                         tr["spoof_reason"] = "Liveness Disabled"
 
                     # If an already recognized candidate student now achieved confirmed live status:
-                    if tr.get("student_id") and tr.get("is_live") and not tr.get("is_spoof") and not tr.get("dispatched", False):
+                    if (
+                        tr.get("student_id")
+                        and tr.get("is_live")
+                        and not tr.get("is_spoof")
+                        and not tr.get("dispatched", False)
+                        and tr.get("frames_tracked", 0) >= LIVENESS_FRAMES
+                    ):
                         tr["matched"] = True
                         tr["dispatched"] = True
                         s_name = tr["student_name"]
@@ -410,16 +416,20 @@ class ClassroomFaceTracker:
                                 tr["student_name"] = s_name
                                 tr["confidence"] = confidence
                                 tr["match_type"] = m_type
-                                tr["matched"] = True
-
-                                # IMMEDIATE ATTENDANCE DISPATCH IF LIVE
+                                # Only mark matched and dispatch attendance if confirmed LIVE and not spoof
                                 if tr.get("is_spoof"):
                                     tr["matched"] = False
                                     logger.warning(
                                         f"🚫 [AntiSpoof REJECTED] Enrolled student {s_name} ({s_id}) photo shown on phone/printout! "
-                                        f"Attendance BLOCKED. ({tr['spoof_reason']})"
+                                        f"Attendance BLOCKED. ({tr.get('spoof_reason')})"
                                     )
-                                elif tr.get("is_live") and not tr.get("dispatched", False):
+                                elif (
+                                    tr.get("is_live")
+                                    and not tr.get("is_spoof")
+                                    and not tr.get("dispatched", False)
+                                    and tr.get("frames_tracked", 0) >= LIVENESS_FRAMES
+                                ):
+                                    tr["matched"] = True
                                     tr["dispatched"] = True
                                     logger.info(
                                         f"🎯 Recognized LIVE Student: {s_name} ({s_id}) "
@@ -433,6 +443,9 @@ class ClassroomFaceTracker:
                                     except Exception:
                                         pass
                                     queue_student_dispatch(s_id, s_name, confidence, m_type, photo_b64)
+                                else:
+                                    # Still verifying liveness across observation window
+                                    tr["matched"] = False
                             else:
                                 tr["confidence"] = max(tr.get("confidence", 0.0), confidence)
         except Exception as e:
@@ -459,9 +472,12 @@ class ClassroomFaceTracker:
                 if is_spoof:
                     label = f"SPOOF: {spoof_reason}"
                     status_type = "Spoof"
-                elif s_name:
+                elif is_live and is_matched and s_name:
                     label = f"{s_name} ({s_id})"
                     status_type = "Verified"
+                elif s_name:
+                    label = f"Verifying ({s_name})"
+                    status_type = "Verifying"
                 else:
                     label = f"Scanning ({conf*100:.0f}%)" if conf > 0.30 else "Detecting Face"
                     status_type = "Scanning"
@@ -710,9 +726,13 @@ def main():
                         tag = f"❌ SPOOF: {det.get('spoof_reason', 'Photo/Screen')}"
                         color = (0, 0, 230)  # Bright Red for spoof rejection
                         text_color = (255, 255, 255)
-                    elif det.get("student_name"):
+                    elif is_match and is_live and det.get("student_name"):
                         tag = f"✓ {det['label']} [{(conf*100):.0f}%]"
-                        color = (0, 230, 110)  # Emerald Green for recognized student
+                        color = (0, 230, 110)  # Emerald Green for confirmed live student
+                        text_color = (0, 0, 0)
+                    elif det.get("student_name"):
+                        tag = f"🔍 {det['label']}"
+                        color = (0, 200, 255)  # Amber / Yellow for student verifying liveness
                         text_color = (0, 0, 0)
                     else:
                         tag = f"{det['label']}"

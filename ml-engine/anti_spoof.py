@@ -6,6 +6,7 @@ Engineered for Classroom Multi-Student Walk-Through Recognition (Up to 65+ Stude
 - Zero False Rejections for Real Live Students
 - Rejects Smartphone/Tablet Screen Replays (Moiré / Digital Grid)
 - Rejects Static Printed Paper Photos (Zero Biological Motion)
+- Rejects Hand-Held 2D Planar Moving Photos (Rigid Planar Correlation)
 - Inclusive Skin Locus & Robust Ambient Lighting Normalization
 """
 
@@ -22,17 +23,17 @@ logger = logging.getLogger("AntiSpoof")
 class AntiSpoofDetector:
     """
     High-Speed Calibrated Anti-Spoofing & Liveness Detector.
-    Calibrated against real-world physical cameras and diverse classroom environments.
+    Calibrated against real-world physical cameras, smartphone displays, and paper printouts.
     """
 
     def __init__(
         self,
         liveness_threshold: float = 0.45,
         min_observation_frames: int = 2,
-        moire_weight: float = 0.25,
-        color_weight: float = 0.25,
+        moire_weight: float = 0.30,
+        color_weight: float = 0.30,
         texture_weight: float = 0.20,
-        temporal_weight: float = 0.30,
+        temporal_weight: float = 0.20,
     ):
         self.liveness_threshold = liveness_threshold
         self.min_observation_frames = min_observation_frames
@@ -46,21 +47,21 @@ class AntiSpoofDetector:
             f"Min Frames: {self.min_observation_frames})"
         )
 
-    def check_frequency_moire(self, crop: np.ndarray) -> Tuple[float, Dict[str, float]]:
+    def check_frequency_moire(self, crop: np.ndarray) -> Tuple[float, Dict[str, Any]]:
         """
         2D Fast Fourier Transform (FFT) spectral analysis to detect screen pixel
         refresh grid harmonics and Moiré interference patterns.
-        Screens exhibit concentrated high-frequency resonance spikes (prominence > 180).
-        Real human skin on webcams exhibits smooth spatial frequency decay (prominence 30-80).
+        - Digital screens (smartphones/tablets/monitors) exhibit distinct harmonic spikes (prominence >= 92).
+        - Real human skin on webcams exhibits smooth spatial frequency decay (prominence 35-75).
         """
         if crop is None or crop.size == 0:
-            return 0.5, {"fft_ratio": 0.0, "peak_prominence": 0.0}
+            return 0.5, {"fft_ratio": 0.0, "peak_prominence": 0.0, "is_screen_moire": False}
 
         try:
             gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
             h, w = gray.shape
             if h < 24 or w < 24:
-                return 0.5, {"fft_ratio": 0.0, "peak_prominence": 0.0}
+                return 0.5, {"fft_ratio": 0.0, "peak_prominence": 0.0, "is_screen_moire": False}
 
             # Standardize resolution for consistent frequency bins
             gray_std = cv2.resize(gray, (128, 128))
@@ -73,7 +74,6 @@ class AntiSpoofDetector:
             dist = np.sqrt((x - cw) ** 2 + (y - ch) ** 2)
 
             # Frequency bands
-            low_mask = dist <= 12
             mid_mask = (dist > 12) & (dist <= 36)
             high_mask = (dist > 36) & (dist <= 60)
 
@@ -89,34 +89,40 @@ class AntiSpoofDetector:
             else:
                 peak_prominence = 0.0
 
-            # Calibrated Scoring:
-            # - Real webcams naturally range from 30 to 90 due to sensor noise & edges.
-            # - Real screen replays show concentrated moiré spikes > 180 to 500+.
-            score = 1.0
-            if peak_prominence > 220.0:
-                score -= 0.60
-            elif peak_prominence > 180.0:
-                score -= 0.35
-
-            if ratio > 1.35:
-                score -= 0.30
-            elif ratio < 0.60:
-                score -= 0.20
+            # Digital screen moire detection:
+            # - Real webcams naturally range from 35 to 75 due to sensor noise & natural facial contours.
+            # - Screen replays show concentrated moiré spikes > 92.0 to 500+.
+            is_screen_moire = False
+            if peak_prominence >= 92.0:
+                is_screen_moire = True
+                score = 0.10
+            elif peak_prominence >= 82.0 and ratio > 0.85:
+                is_screen_moire = True
+                score = 0.18
+            elif ratio > 1.30:
+                score = 0.35
+            else:
+                score = 1.0
 
             score = float(np.clip(score, 0.0, 1.0))
-            return score, {"fft_ratio": round(ratio, 3), "peak_prominence": round(peak_prominence, 2)}
+            return score, {
+                "fft_ratio": round(ratio, 3),
+                "peak_prominence": round(peak_prominence, 2),
+                "is_screen_moire": is_screen_moire
+            }
         except Exception as e:
             logger.debug(f"FFT error: {e}")
-            return 0.5, {"fft_ratio": 0.0, "peak_prominence": 0.0}
+            return 0.5, {"fft_ratio": 0.0, "peak_prominence": 0.0, "is_screen_moire": False}
 
     def check_color_chrominance(self, crop: np.ndarray) -> Tuple[float, Dict[str, Any]]:
         """
-        Color Space Analysis (YCbCr + HSV).
+        Color Space Analysis (YCbCr).
         - Inclusive skin locus: covers all human complexions (fair to dark) under diverse indoor lighting.
-        - Non-skin surfaces, phone bezels, or grayscale printouts are flagged.
+        - Paper printout inks exhibit flat chromatic distributions with low standard deviation (cb_std < 3.2).
+        - Living human skin has rich subsurface light scattering across 3D contours (cb_std > 3.8).
         """
         if crop is None or crop.size == 0:
-            return 0.0, {"in_locus": False, "cr_mean": 0, "cb_mean": 0}
+            return 0.0, {"in_locus": False, "cr_mean": 0, "cb_mean": 0, "is_paper_chroma": True}
 
         try:
             ycrcb = cv2.cvtColor(crop, cv2.COLOR_BGR2YCrCb)
@@ -138,28 +144,34 @@ class AntiSpoofDetector:
             # Inclusive human skin locus across global ethnicities and ambient lighting:
             in_skin_locus = (115.0 <= cr_mean <= 192.0) and (70.0 <= cb_mean <= 145.0)
 
-            score = 1.0
-            if not in_skin_locus:
-                score -= 0.60
-
-            # Abnormal blue dispersion from phone backlight
-            if cb_std > 18.0:
-                score -= 0.30
-
-            # Pure flat grayscale printout
-            if cr_std < 0.8 and cb_std < 0.8:
-                score -= 0.45
+            # Paper Printout Chrominance Rejection:
+            is_paper_chroma = False
+            if cb_std < 2.2:
+                is_paper_chroma = True
+                score = 0.10
+            elif cb_std < 3.1:
+                is_paper_chroma = True
+                score = 0.20
+            elif cb_std < 3.5 and cr_std < 4.8:
+                is_paper_chroma = True
+                score = 0.25
+            elif not in_skin_locus:
+                score = 0.15
+            else:
+                score = 1.0
 
             score = float(np.clip(score, 0.0, 1.0))
             return score, {
                 "in_locus": in_skin_locus,
                 "cr_mean": round(cr_mean, 1),
                 "cb_mean": round(cb_mean, 1),
-                "cb_std": round(cb_std, 2)
+                "cr_std": round(cr_std, 2),
+                "cb_std": round(cb_std, 2),
+                "is_paper_chroma": is_paper_chroma
             }
         except Exception as e:
             logger.debug(f"Color chrominance error: {e}")
-            return 0.5, {"in_locus": True}
+            return 0.5, {"in_locus": True, "is_paper_chroma": False}
 
     def check_specular_glare(self, crop: np.ndarray) -> Tuple[float, Dict[str, Any]]:
         """
@@ -180,12 +192,10 @@ class AntiSpoofDetector:
             glare_ratio = float(white_count / total_pixels)
 
             score = 1.0
-            # Real webcams can have overhead lighting reflections on forehead (up to 5-10%)
-            # Screens or glossy reflections have intense clipped hotspots > 18%
-            if glare_ratio > 0.22:
-                score -= 0.50
-            elif glare_ratio > 0.15:
-                score -= 0.25
+            if glare_ratio > 0.20:
+                score = 0.25
+            elif glare_ratio > 0.12:
+                score = 0.60
 
             score = float(np.clip(score, 0.0, 1.0))
             return score, {"glare_ratio": round(glare_ratio, 4)}
@@ -196,9 +206,11 @@ class AntiSpoofDetector:
     def check_micro_texture(self, crop: np.ndarray) -> Tuple[float, Dict[str, Any]]:
         """
         Multi-scale Laplacian micro-texture analysis.
+        - Living faces have skin pores, fine lines, eyelashes, and hair (lap_var >= 85).
+        - Flat paper printouts have soft printer halftone dots or slight defocus (lap_var < 80).
         """
         if crop is None or crop.size == 0:
-            return 0.5, {"laplacian_var": 0.0}
+            return 0.5, {"laplacian_var": 0.0, "is_flat_texture": False}
 
         try:
             gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
@@ -206,68 +218,112 @@ class AntiSpoofDetector:
             lap = cv2.Laplacian(resized, cv2.CV_64F)
             lap_var = float(lap.var())
 
-            score = 1.0
-            # Completely flat blurred paper
-            if lap_var < 15.0:
-                score -= 0.50
-            # Extreme digital pixel grid
-            elif lap_var > 4500.0:
-                score -= 0.40
+            is_flat_texture = lap_var < 80.0
+            if is_flat_texture:
+                score = 0.30
+            elif lap_var > 3500.0:
+                score = 0.20
+            else:
+                score = 1.0
 
             score = float(np.clip(score, 0.0, 1.0))
-            return score, {"laplacian_var": round(lap_var, 1)}
+            return score, {"laplacian_var": round(lap_var, 1), "is_flat_texture": is_flat_texture}
         except Exception as e:
             logger.debug(f"Micro-texture error: {e}")
-            return 0.5, {"laplacian_var": 0.0}
+            return 0.5, {"laplacian_var": 0.0, "is_flat_texture": False}
 
-    def check_temporal_dynamics(self, crops_history: List[np.ndarray], landmarks_history: Optional[List[Any]] = None) -> Tuple[float, Dict[str, Any]]:
+    def check_temporal_dynamics(
+        self,
+        crops_history: List[np.ndarray],
+        landmarks_history: Optional[List[Any]] = None
+    ) -> Tuple[float, Dict[str, Any]]:
         """
-        Temporal micro-movement analysis across consecutive frames.
-        - Zero-Motion Detection (Static Photo / Paper Printout):
-          Real cameras and living humans naturally vary with diff > 1.5.
-          A static still photo held in front of the camera has diff < 0.85 across frames.
+        Temporal micro-movement & planar motion analysis across consecutive frames.
+        1. Zero-Motion Detection (Static Photo / Fixed Screen):
+           Real cameras and living humans naturally vary with diff > 1.2 across frames.
+           A static still photo held in front of the camera has diff < 0.85 across frames.
+        2. Hand-Held 2D Planar Motion (Hand Shaking a Phone/Photo):
+           When a flat photo or phone is held in hand, hand tremor moves all pixels
+           identically as a rigid 2D planar body. After rigid phase-correlation alignment,
+           the residual difference drops below 0.92, whereas real 3D human faces retain
+           natural non-rigid variance (residual > 1.4).
         """
         if not crops_history or len(crops_history) < 2:
-            return 0.5, {"diff_mean": 2.5, "status": "INSUFFICIENT_HISTORY"}
+            return 0.5, {
+                "diff_mean": 2.5,
+                "status": "INSUFFICIENT_HISTORY",
+                "is_static": False,
+                "is_rigid_planar": False
+            }
 
         try:
             diffs = []
-            standard_size = (96, 96)
+            residuals = []
+            responses = []
+            standard_size = (64, 64)
             grays = [
-                cv2.resize(cv2.cvtColor(c, cv2.COLOR_BGR2GRAY), standard_size)
+                cv2.resize(cv2.cvtColor(c, cv2.COLOR_BGR2GRAY), standard_size).astype(np.float32)
                 for c in crops_history[-8:]
                 if c is not None and c.size > 0
             ]
 
             if len(grays) < 2:
-                return 0.5, {"diff_mean": 2.5, "status": "INSUFFICIENT_HISTORY"}
+                return 0.5, {
+                    "diff_mean": 2.5,
+                    "status": "INSUFFICIENT_HISTORY",
+                    "is_static": False,
+                    "is_rigid_planar": False
+                }
 
             for i in range(1, len(grays)):
-                diff = np.mean(np.abs(grays[i].astype(float) - g1 if 'g1' in locals() else grays[i].astype(float) - grays[i - 1].astype(float)))
-                diffs.append(float(diff))
+                g_prev = grays[i - 1]
+                g_curr = grays[i]
+                diff = float(np.mean(np.abs(g_curr - g_prev)))
+                diffs.append(diff)
+
+                # Rigid 2D Planar alignment using sub-millisecond phase correlation
+                shift, resp = cv2.phaseCorrelate(g_prev, g_curr)
+                M = np.float32([[1, 0, -shift[0]], [0, 1, -shift[1]]])
+                aligned = cv2.warpAffine(g_curr, M, standard_size)
+                # Compare interior 80% to avoid border interpolation artifacts
+                residual = float(np.mean(np.abs(g_prev[6:-6, 6:-6] - aligned[6:-6, 6:-6])))
+                residuals.append(residual)
+                responses.append(float(resp))
 
             avg_diff = float(np.mean(diffs))
-            diff_std = float(np.std(diffs))
+            avg_residual = float(np.mean(residuals))
+            avg_response = float(np.mean(responses))
+
+            # 1. Completely motionless still photo
+            is_static = avg_diff < 0.85
+            # 2. Rigid 2D hand-held moving photo/phone
+            is_rigid_planar = (avg_diff >= 0.85 and avg_response > 0.85 and avg_residual < 1.05)
 
             score = 1.0
-            # Static Photo Rejection:
-            # If avg_diff < 0.85 over 3+ frames, the image is completely frozen
-            if avg_diff < 0.85 and len(grays) >= 3:
+            if is_static:
+                score = 0.15
+            elif is_rigid_planar:
                 score = 0.20
-            elif avg_diff < 1.10 and len(grays) >= 4:
-                score = 0.35
             else:
                 score = 1.0
 
             score = float(np.clip(score, 0.0, 1.0))
             return score, {
                 "diff_mean": round(avg_diff, 2),
-                "diff_std": round(diff_std, 2),
-                "num_frames": len(grays)
+                "residual_mean": round(avg_residual, 2),
+                "phase_response": round(avg_response, 3),
+                "num_frames": len(grays),
+                "is_static": is_static,
+                "is_rigid_planar": is_rigid_planar
             }
         except Exception as e:
             logger.debug(f"Temporal dynamics error: {e}")
-            return 0.5, {"diff_mean": 2.5, "status": "ERROR"}
+            return 0.5, {
+                "diff_mean": 2.5,
+                "status": "ERROR",
+                "is_static": False,
+                "is_rigid_planar": False
+            }
 
     def evaluate_crop(self, crop: np.ndarray) -> Tuple[float, Dict[str, Any]]:
         """
@@ -319,56 +375,59 @@ class AntiSpoofDetector:
 
         # Fuse passive optical + temporal movement
         if frames_tracked >= self.min_observation_frames:
-            fused_score = 0.65 * passive_score + 0.35 * temp_score
+            fused_score = 0.60 * passive_score + 0.40 * temp_score
         else:
             fused_score = 0.85 * passive_score + 0.15 * temp_score
 
         fused_score = float(np.clip(fused_score, 0.0, 1.0))
 
-        # Precision Spoof Rejection:
-        # 1. Screen Moiré / Extreme Pixel Grid Gate
-        if details.get("peak_prominence", 0.0) > 180.0 or details.get("laplacian_var", 0.0) > 4500.0:
-            fused_score = min(fused_score * 0.35, 0.28)
+        # Precision Spoof Rejection Vetoes:
+        # 1. Screen Moiré / Digital Pixel Grid Gate
+        hard_veto_reason = None
+        if details.get("is_screen_moire") or details.get("peak_prominence", 0.0) >= 92.0 or details.get("laplacian_var", 0.0) > 3500.0:
             hard_veto_reason = "Screen Replay Detected (Digital Screen Moire)"
-        # 2. Static Photo Gate: Zero biological movement across observation frames
-        elif temp_details.get("diff_mean", 10.0) < 0.85 and temp_details.get("num_frames", frames_tracked) >= 2:
-            fused_score = min(fused_score * 0.35, 0.25)
+        # 2. Paper Printout Gate (Reduced Chrominance + Matte Flat Texture)
+        elif details.get("is_paper_chroma") and (details.get("is_flat_texture") or details.get("cb_std", 10.0) < 2.6):
+            hard_veto_reason = "Paper Printout Detected (Matte Paper / Color)"
+        elif details.get("cb_std", 10.0) < 2.2:
+            hard_veto_reason = "Paper Printout Detected (Grayscale / Low Chroma)"
+        # 3. Static Photo Gate: Zero biological movement across observation frames
+        elif temp_details.get("is_static") and temp_details.get("num_frames", frames_tracked) >= 2:
             hard_veto_reason = "Static Photo Detected (Zero biological motion)"
-        # 3. Non-Skin Surface / Grayscale Printout
+        # 4. Hand-Held 2D Moving Surface Gate (Planar motion of phone/photo)
+        elif temp_details.get("is_rigid_planar") and temp_details.get("num_frames", frames_tracked) >= 2:
+            hard_veto_reason = "Photo/Screen Replay Detected (Rigid 2D planar motion)"
+        # 5. Non-Skin Surface / Off-Color Replay
         elif not details.get("in_locus", True):
-            fused_score = min(fused_score * 0.45, 0.32)
-            hard_veto_reason = "Non-Skin Surface / Grayscale Printout"
-        else:
-            hard_veto_reason = None
-
-        is_spoof = False
-        is_live = False
-        reason = "Live Student Confirmed"
+            hard_veto_reason = "Non-Skin Surface / Off-Color Replay"
 
         if hard_veto_reason:
             is_spoof = True
+            is_live = False
+            status = "SPOOF"
             reason = hard_veto_reason
+        elif frames_tracked < self.min_observation_frames:
+            # Observation window in progress - CANNOT be confirmed live yet!
+            is_live = False
+            is_spoof = False
+            status = "VERIFYING"
+            reason = f"Verifying Liveness ({frames_tracked}/{self.min_observation_frames})"
         elif fused_score < self.liveness_threshold:
-            if frames_tracked >= self.min_observation_frames:
-                is_spoof = True
-                reason = "Spoof Attack Detected"
-            else:
-                is_live = False
-                reason = f"Scanning ({frames_tracked}/{self.min_observation_frames})"
-        elif frames_tracked >= self.min_observation_frames:
+            is_spoof = True
+            is_live = False
+            status = "SPOOF"
+            reason = "Spoof Attack Detected"
+        else:
             is_live = True
             is_spoof = False
+            status = "LIVE"
             reason = "Live Student Confirmed"
-        else:
-            is_live = True  # Tentatively live while verifying in background
-            is_spoof = False
-            reason = "Verifying Liveness"
 
         return {
             "liveness_score": round(fused_score, 3),
             "is_live": is_live,
             "is_spoof": is_spoof,
-            "status": "LIVE" if is_live else ("SPOOF" if is_spoof else "VERIFYING"),
+            "status": status,
             "reason": reason,
             "frames_tracked": frames_tracked,
             "details": details
