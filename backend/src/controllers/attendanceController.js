@@ -104,6 +104,15 @@ const recordMatchWebhook = async (req, res) => {
     const lastSeen = recentMatchCache.get(cleanId);
     if (lastSeen && now - lastSeen < cooldownMs) {
       const minutesAgo = Math.round((now - lastSeen) / 60000);
+      const io = req.app.get('io');
+      if (io) {
+        io.emit('student_recognized', {
+          studentId: cleanId,
+          alreadyMarked: true,
+          minutesAgo,
+          confidence: parsedConfidence
+        });
+      }
       return res.status(200).json({
         success: true,
         debounced: true,
