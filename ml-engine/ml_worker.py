@@ -5,7 +5,7 @@ import logging
 import base64
 import threading
 import concurrent.futures
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Any
 import cv2
 import requests
 import numpy as np
