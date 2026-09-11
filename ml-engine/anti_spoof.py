@@ -27,8 +27,8 @@ class AntiSpoofDetector:
 
     def __init__(
         self,
-        liveness_threshold: float = 0.50,
-        min_observation_frames: int = 3,
+        liveness_threshold: float = 0.45,
+        min_observation_frames: int = 2,
         moire_weight: float = 0.25,
         color_weight: float = 0.25,
         texture_weight: float = 0.20,
@@ -330,8 +330,8 @@ class AntiSpoofDetector:
         if details.get("peak_prominence", 0.0) > 180.0 or details.get("laplacian_var", 0.0) > 4500.0:
             fused_score = min(fused_score * 0.35, 0.28)
             hard_veto_reason = "Screen Replay Detected (Digital Screen Moire)"
-        # 2. Static Photo Gate: Zero biological movement across multiple observation frames
-        elif temp_details.get("diff_mean", 10.0) < 0.85 and temp_details.get("num_frames", frames_tracked) >= 3:
+        # 2. Static Photo Gate: Zero biological movement across observation frames
+        elif temp_details.get("diff_mean", 10.0) < 0.85 and temp_details.get("num_frames", frames_tracked) >= 2:
             fused_score = min(fused_score * 0.35, 0.25)
             hard_veto_reason = "Static Photo Detected (Zero biological motion)"
         # 3. Non-Skin Surface / Grayscale Printout

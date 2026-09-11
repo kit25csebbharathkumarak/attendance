@@ -29,22 +29,39 @@ class FaceMatcher:
         if self.device.type == "cpu":
             optimal_threads = min(6, os.cpu_count() or 4)
             torch.set_num_threads(optimal_threads)
-            logger.info(f"Configured PyTorch CPU threads: {optimal_threads}")
+            try:
+                torch.set_flush_denormal(True)
+            except Exception:
+                pass
+            logger.info(f"Configured PyTorch CPU threads: {optimal_threads} (Flush Denormals: ON)")
             
         logger.info(f"Initializing FaceNet & MTCNN on device: {self.device}")
 
-        # Deep Learning Face Detector & Aligner (configured for high-speed multi-face detection)
+        # Deep Learning Face Detector & Aligner (optimized for high accuracy and speed across 65+ students)
         self.mtcnn = MTCNN(
             image_size=160,
             margin=14,
             keep_all=True,
             min_face_size=20,
+            factor=0.65,
             device=self.device,
             post_process=False
         )
 
         # Pretrained 512-d FaceNet Feature Extractor
         self.model = InceptionResnetV1(pretrained="vggface2").eval().to(self.device)
+
+        # Pre-warm FaceNet and MTCNN to eliminate cold-start compilation delay during live detection
+        try:
+            with torch.inference_mode():
+                dummy_t = torch.zeros((1, 3, 160, 160), dtype=torch.float32, device=self.device)
+                self.model(dummy_t)
+                dummy_pil = Image.new("RGB", (160, 160))
+                self.mtcnn.detect(dummy_pil)
+            logger.info("FaceNet and MTCNN pre-warmed. Instant live inference ready.")
+        except Exception as e:
+            logger.debug(f"Pre-warm notice: {e}")
+
         logger.info("FaceNet (InceptionResnetV1, 512-d) and multi-face MTCNN ready.")
 
         self.enrolled_students: List[Dict[str, Any]] = []
@@ -110,7 +127,7 @@ class FaceMatcher:
 
         h, w = frame.shape[:2]
         # For ultra-fast multi-face detection (optimized for 65+ students in classroom)
-        target_width = 512.0
+        target_width = 480.0
         scale_factor = 1.0
         if w > target_width:
             scale_factor = target_width / w
