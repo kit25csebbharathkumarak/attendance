@@ -1,4 +1,4 @@
-const { spawn, exec } = require('child_process');
+const { spawn, exec, execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const { clearAttendanceData, isMongoConnected } = require('../config/dataStore');
@@ -22,9 +22,9 @@ const killExistingWorker = () => {
   if (workerProcess) {
     const pid = workerProcess.pid;
     if (process.platform === 'win32') {
-      try { exec(`taskkill /pid ${pid} /T /F`); } catch (e) {}
+      try { execSync(`taskkill /pid ${pid} /T /F`, { stdio: 'ignore' }); } catch (e) {}
     } else {
-      try { workerProcess.kill('SIGTERM'); } catch (e) {}
+      try { workerProcess.kill('SIGKILL'); } catch (e) {}
     }
     workerProcess = null;
   }
@@ -36,14 +36,20 @@ const killExistingWorker = () => {
       const pid = parseInt(fs.readFileSync(lockPath, 'utf8').trim(), 10);
       if (pid && !isNaN(pid)) {
         if (process.platform === 'win32') {
-          try { exec(`taskkill /pid ${pid} /T /F`); } catch (e) {}
+          try { execSync(`taskkill /pid ${pid} /T /F`, { stdio: 'ignore' }); } catch (e) {}
         } else {
-          try { process.kill(pid, 'SIGTERM'); } catch (e) {}
+          try { process.kill(pid, 'SIGKILL'); } catch (e) {}
         }
       }
       try { fs.unlinkSync(lockPath); } catch (e) {}
     }
   } catch (e) {}
+
+  // Allow Windows DirectShow driver 150ms to release hardware handle
+  if (process.platform === 'win32') {
+    const start = Date.now();
+    while (Date.now() - start < 150) {}
+  }
 };
 
 /**

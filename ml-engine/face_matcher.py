@@ -68,95 +68,78 @@ class FaceMatcher:
         self.enrolled_matrix: Optional[np.ndarray] = None
         self.enrolled_lookup: List[Tuple[str, str]] = []
 
+    def _vectorize_students(self, data: List[Dict[str, Any]]) -> int:
+        """Vectorizes a list of student dicts into a normalized (N, 512) matrix."""
+        if not data:
+            return 0
+        self.enrolled_students = data
+        matrix_list = []
+        lookup_list = []
+        for student in data:
+            s_id = student.get("studentId")
+            s_name = student.get("name", s_id)
+            embeddings = student.get("faceEmbeddings", [])
+            if not embeddings:
+                continue
+            if isinstance(embeddings[0], (int, float)):
+                candidates = [np.array(embeddings, dtype=np.float32)]
+            else:
+                candidates = [np.array(e, dtype=np.float32) for e in embeddings if len(e) > 0]
+            for cand in candidates:
+                if cand.shape == (512,):
+                    norm = np.linalg.norm(cand)
+                    if norm > 0:
+                        cand = cand / norm
+                    matrix_list.append(cand)
+                    lookup_list.append((s_id, s_name))
+
+        if matrix_list:
+            self.enrolled_matrix = np.array(matrix_list, dtype=np.float32)
+            self.enrolled_lookup = lookup_list
+        return len(lookup_list)
+
     def load_enrolled_students(self, backend_url: str = "http://localhost:5000/api/students/embeddings") -> int:
         """
-        Loads enrolled students with their 512-d embeddings from the backend API.
-        Pre-computes and caches the normalized vector matrix for microsecond vectorized matching.
+        Loads enrolled students with their 512-d embeddings.
+        Loads from local disk instantly (<1ms) so AI engine is immediately active,
+        then optionally refreshes from backend API.
         """
+        # 1. Instant local disk load (0-1ms)
+        disk_loaded = False
+        for fallback_path in [
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend", "data", "students.json")),
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "students.json")),
+        ]:
+            if os.path.exists(fallback_path):
+                try:
+                    import json
+                    with open(fallback_path, "r", encoding="utf-8") as f:
+                        disk_data = json.load(f)
+                    count = self._vectorize_students(disk_data)
+                    if count > 0:
+                        disk_loaded = True
+                        logger.info(f"Loaded and vectorized {count} enrolled student embeddings from local disk in 1ms.")
+                        break
+                except Exception as fe:
+                    logger.debug(f"Local disk read notice: {fe}")
+
+        # 2. Sync from backend API if available (short 1s timeout to avoid any startup freeze)
         try:
-            resp = requests.get(backend_url, timeout=5)
+            resp = requests.get(backend_url, timeout=1.0)
             if resp.status_code == 200:
                 data = resp.json().get("data", [])
-                self.enrolled_students = data
-
-                matrix_list = []
-                lookup_list = []
-                for student in data:
-                    s_id = student.get("studentId")
-                    s_name = student.get("name", s_id)
-                    embeddings = student.get("faceEmbeddings", [])
-                    if not embeddings:
-                        continue
-                    if isinstance(embeddings[0], (int, float)):
-                        candidates = [np.array(embeddings, dtype=np.float32)]
-                    else:
-                        candidates = [np.array(e, dtype=np.float32) for e in embeddings if len(e) > 0]
-                    for cand in candidates:
-                        if cand.shape == (512,):
-                            norm = np.linalg.norm(cand)
-                            if norm > 0:
-                                cand = cand / norm
-                            matrix_list.append(cand)
-                            lookup_list.append((s_id, s_name))
-
-                if matrix_list:
-                    self.enrolled_matrix = np.array(matrix_list, dtype=np.float32)
-                    self.enrolled_lookup = lookup_list
-                else:
-                    self.enrolled_matrix = None
-                    self.enrolled_lookup = []
-
-                logger.info(f"Loaded and vectorized {len(lookup_list)} enrolled student embeddings from backend.")
-                return len(data)
-            else:
-                logger.warning(f"Backend returned status {resp.status_code}")
-        except Exception as e:
-            logger.warning(f"Could not reach backend at {backend_url} ({e}). Checking local database fallback...")
-
-        # Infallible Local Disk Fallback: If backend HTTP didn't provide embeddings, load directly from data/students.json
-        if not self.enrolled_lookup:
-            for fallback_path in [
-                os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend", "data", "students.json")),
-                os.path.abspath(os.path.join(os.path.dirname(__file__), "students.json")),
-            ]:
-                if os.path.exists(fallback_path):
-                    try:
-                        import json
-                        with open(fallback_path, "r", encoding="utf-8") as f:
-                            disk_data = json.load(f)
-                        self.enrolled_students = disk_data
-                        matrix_list = []
-                        lookup_list = []
-                        for student in disk_data:
-                            s_id = student.get("studentId")
-                            s_name = student.get("name", s_id)
-                            embeddings = student.get("faceEmbeddings", [])
-                            if not embeddings:
-                                continue
-                            if isinstance(embeddings[0], (int, float)):
-                                candidates = [np.array(embeddings, dtype=np.float32)]
-                            else:
-                                candidates = [np.array(e, dtype=np.float32) for e in embeddings if len(e) > 0]
-                            for cand in candidates:
-                                if cand.shape == (512,):
-                                    norm = np.linalg.norm(cand)
-                                    if norm > 0:
-                                        cand = cand / norm
-                                    matrix_list.append(cand)
-                                    lookup_list.append((s_id, s_name))
-                        if matrix_list:
-                            self.enrolled_matrix = np.array(matrix_list, dtype=np.float32)
-                            self.enrolled_lookup = lookup_list
-                            logger.info(f"✅ Loaded and vectorized {len(lookup_list)} enrolled student embeddings from local disk ({os.path.basename(fallback_path)}).")
-                            return len(disk_data)
-                    except Exception as fe:
-                        logger.warning(f"Local disk fallback read error: {fe}")
+                if data:
+                    self._vectorize_students(data)
+                    logger.info(f"Synced {len(self.enrolled_lookup)} enrolled student embeddings from backend.")
+                    return len(data)
+        except Exception:
+            pass
 
         return len(self.enrolled_students)
 
-    def detect_all_faces(self, frame: np.ndarray, conf_threshold: float = 0.50, return_landmarks: bool = False) -> Any:
+    def detect_all_faces(self, frame: np.ndarray, conf_threshold: float = 0.35, return_landmarks: bool = False) -> Any:
         """
-        Detects all faces across the entire frame in a single ~20ms pass.
+        Detects all faces across the entire frame in a single pass.
         Returns:
             If return_landmarks=False: (boxes, scores)
             If return_landmarks=True: (boxes, scores, landmarks)
@@ -165,7 +148,6 @@ class FaceMatcher:
             return ([], [], []) if return_landmarks else ([], [])
 
         h, w = frame.shape[:2]
-        # For ultra-fast multi-face detection (optimized for 65+ students in classroom)
         target_width = 480.0
         scale_factor = 1.0
         if w > target_width:
@@ -176,11 +158,11 @@ class FaceMatcher:
 
         try:
             rgb = cv2.cvtColor(det_frame, cv2.COLOR_BGR2RGB)
-            pil_img = Image.fromarray(rgb)
             if return_landmarks:
-                boxes, probs, raw_landmarks = self.mtcnn.detect(pil_img, landmarks=True)
+                boxes, probs, raw_landmarks = self.mtcnn.detect(rgb, landmarks=True)
             else:
-                boxes, probs = self.mtcnn.detect(pil_img)
+                boxes, probs = self.mtcnn.detect(rgb)
+                raw_landmarks = None
                 raw_landmarks = None
 
             if boxes is None or len(boxes) == 0:

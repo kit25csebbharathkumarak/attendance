@@ -27,7 +27,6 @@ try:
 except ImportError:
     pass
 
-from face_matcher import FaceMatcher
 from anti_spoof import AntiSpoofDetector
 
 logging.basicConfig(
@@ -60,7 +59,7 @@ http_session = requests.Session()
 # Non-blocking background worker pool for webhooks
 webhook_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="WebhookDispatch")
 # Dedicated non-blocking worker pool for FaceNet feature extraction
-embedding_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="FaceEmbed")
+embedding_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="FaceEmbed")
 recent_matches_cache: Dict[str, float] = {}
 recent_matches_lock = threading.Lock()
 DISPATCH_COOLDOWN_SECONDS = 45.0  # Avoid flooding backend for the same student within 45s
@@ -124,16 +123,18 @@ class ThreadedCamera:
     """
     def __init__(self, cam_source):
         self.cam_source = cam_source
-        self.cap = open_camera_source(cam_source)
+        self.cap = None
         self.ret = False
         self.frame = None
-        self.is_synthetic = not (self.cap and self.cap.isOpened())
+        self.is_synthetic = False
         self.lock = threading.Lock()
         self.running = True
         self.thread = threading.Thread(target=self._capture_loop, daemon=True)
         self.thread.start()
 
     def _capture_loop(self):
+        self.cap = open_camera_source(self.cam_source)
+        self.is_synthetic = not (self.cap and self.cap.isOpened())
         consecutive_failures = 0
         while self.running:
             if not self.is_synthetic:
@@ -208,10 +209,10 @@ class DashboardBroadcaster:
                     small = cv2.resize(frame_to_send, (480, 270))
                     _, buf = cv2.imencode('.jpg', small, [int(cv2.IMWRITE_JPEG_QUALITY), 55])
                     b64 = "data:image/jpeg;base64," + base64.b64encode(buf).decode('utf-8')
-                    http_session.post(self.endpoint_url, json={"frame": b64}, timeout=0.3)
+                    http_session.post(self.endpoint_url, json={"frame": b64}, timeout=0.25)
                 except Exception:
                     pass
-            time.sleep(0.04)  # ~20-25 FPS smooth broadcast
+            time.sleep(0.055)  # ~18 FPS fluid dashboard broadcast
 
     def stop(self):
         self.running = False
@@ -528,8 +529,8 @@ class AIScannerWorker:
                 metric_count = 0
                 last_metric_time = now
 
-            # Pacing
-            time.sleep(0.002)
+            # Pacing: allows FaceNet background threads immediate CPU priority
+            time.sleep(0.020)
 
     def stop(self):
         self.running = False
@@ -537,20 +538,24 @@ class AIScannerWorker:
 
 def acquire_single_instance_lock():
     lock_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml_worker.lock")
-    try:
-        lock_file = open(lock_path, "w")
-        if os.name == "nt":
-            import msvcrt
-            msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
-        else:
-            import fcntl
-            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        lock_file.write(str(os.getpid()))
-        lock_file.flush()
-        return lock_file, lock_path
-    except (OSError, IOError):
-        logger.error("❌ Another instance of ML Worker is already running. Exiting to avoid camera hardware conflict.")
-        sys.exit(0)
+    for attempt in range(4):
+        try:
+            lock_file = open(lock_path, "w")
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            lock_file.write(str(os.getpid()))
+            lock_file.flush()
+            return lock_file, lock_path
+        except (OSError, IOError):
+            if attempt < 3:
+                time.sleep(0.15)
+                continue
+            logger.error("❌ Another instance of ML Worker is already running. Exiting to avoid camera hardware conflict.")
+            sys.exit(0)
 
 
 def release_single_instance_lock(lock_file, lock_path):
@@ -571,41 +576,30 @@ def open_camera_source(cam_source):
         cap = cv2.VideoCapture(cam_index)
         return cap
 
-    # 1. DirectShow with MJPG FourCC (prevents YUY2 stride corruption on Windows)
-    cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
-    if cap.isOpened():
-        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        for _ in range(6):
-            ret, _ = cap.read()
-            if ret:
-                break
-            time.sleep(0.04)
-        return cap
+    # DirectShow with fast retries (avoids MSMF 20-second hang on Windows)
+    for attempt in range(4):
+        cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
+        if cap.isOpened():
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            for _ in range(3):
+                ret, _ = cap.read()
+                if ret:
+                    break
+                time.sleep(0.02)
+            return cap
+        time.sleep(0.15)
 
-    # 2. Media Foundation (CAP_MSMF) fallback
-    cap = cv2.VideoCapture(cam_index, cv2.CAP_MSMF)
-    if cap.isOpened():
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        for _ in range(6):
-            ret, _ = cap.read()
-            if ret:
-                break
-            time.sleep(0.04)
-        return cap
-
-    # 3. Default fallback
+    # Fast fallback default
     cap = cv2.VideoCapture(cam_index)
     if cap.isOpened():
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     return cap
 
 
-def sync_students_periodically(matcher: FaceMatcher, stop_event: threading.Event):
+def sync_students_periodically(matcher: Any, stop_event: threading.Event):
     """Background thread that refreshes enrolled students every 10 seconds without stalling video."""
     while not stop_event.is_set():
         stop_event.wait(10.0)
@@ -648,6 +642,7 @@ def main():
     def init_ai_engine():
         try:
             logger.info("Initializing FaceNet InceptionResnetV1 & Multi-Face MTCNN...")
+            from face_matcher import FaceMatcher
             m = FaceMatcher(similarity_threshold=SIMILARITY_THRESHOLD)
             enrolled = m.load_enrolled_students(backend_url=BACKEND_EMBEDDINGS_URL)
             w = AIScannerWorker(camera_stream, m)
