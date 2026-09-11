@@ -248,13 +248,25 @@ export const Dashboard = () => {
       fetchTodayAttendance();
     };
 
+    // Listen to real-time student recognition (including debounced re-visits)
+    const handleStudentRecognized = (data) => {
+      if (data?.studentId) {
+        setHighlightedId(data.studentId);
+        setTimeout(() => {
+          setHighlightedId(null);
+        }, 2500);
+      }
+    };
+
     socket.on('new_attendance', handleNewAttendance);
+    socket.on('student_recognized', handleStudentRecognized);
     socket.on('worker_status', handleWorkerStatus);
     socket.on('data_reset', handleDataReset);
     socket.on('student_deleted', handleStudentDeleted);
 
     return () => {
       socket.off('new_attendance', handleNewAttendance);
+      socket.off('student_recognized', handleStudentRecognized);
       socket.off('worker_status', handleWorkerStatus);
       socket.off('data_reset', handleDataReset);
       socket.off('student_deleted', handleStudentDeleted);

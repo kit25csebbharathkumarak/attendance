@@ -224,7 +224,7 @@ class ClassroomFaceTracker:
     - Maintains identity persistence: Confirmed students require ZERO FaceNet inference on subsequent frames!
     - Only gathers and batches unconfirmed or newly visible faces for deep neural network embedding.
     """
-    def __init__(self, iou_threshold: float = 0.25, max_distance: float = 65.0, expiry_seconds: float = 2.0):
+    def __init__(self, iou_threshold: float = 0.15, max_distance: float = 120.0, expiry_seconds: float = 2.5):
         self.iou_threshold = iou_threshold
         self.max_distance = max_distance
         self.expiry_seconds = expiry_seconds
@@ -494,7 +494,7 @@ class AIScannerWorker:
     def __init__(self, camera_stream: ThreadedCamera, matcher: FaceMatcher):
         self.camera = camera_stream
         self.matcher = matcher
-        self.tracker = ClassroomFaceTracker(iou_threshold=0.25, max_distance=65.0, expiry_seconds=2.0)
+        self.tracker = ClassroomFaceTracker(iou_threshold=0.15, max_distance=120.0, expiry_seconds=2.5)
         self.running = True
         self.fps = 0.0
         self.scan_count = 0
@@ -514,11 +514,11 @@ class AIScannerWorker:
                 time.sleep(0.01)
                 continue
 
-            # 1. Single-pass high-speed multi-face & landmark detection (~20ms)
-            face_boxes, face_scores, face_landmarks = self.matcher.detect_all_faces(frame, conf_threshold=0.45, return_landmarks=True)
+            # 1. Single-pass ultra-fast multi-face detection (35ms, without landmark regression overhead)
+            face_boxes, face_scores = self.matcher.detect_all_faces(frame, conf_threshold=0.35, return_landmarks=False)
 
             # 2. Update classroom spatial identity tracker with liveness & anti-spoof checks
-            self.tracker.update(face_boxes, frame, self.matcher, face_landmarks)
+            self.tracker.update(face_boxes, frame, self.matcher)
 
             # Metric updates
             metric_count += 1
@@ -528,8 +528,8 @@ class AIScannerWorker:
                 metric_count = 0
                 last_metric_time = now
 
-            # Sleep 10ms for CPU pacing
-            time.sleep(0.010)
+            # Pacing
+            time.sleep(0.002)
 
     def stop(self):
         self.running = False
